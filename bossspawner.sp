@@ -1,15 +1,16 @@
 /*	
  *	============================================================================
  *	
- *	[TF2] Automatic Halloween Boss Spawner
+ *	[TF2] Custom Boss Spawner
  *	Alliedmodders: http://forums.alliedmods.net/member.php?u=87026
- *	Current Version: 4.0.2
+ *	Current Version: 4.0 BETA
  *
  *	This plugin is FREE and can be distributed to anyone.  
  *	If you have paid for this plugin, get your money back.
  *	
  *	Version Log:
- *	v.4.0.2
+ *	v.4.0 BETA
+ * 	- Renamed plugin to "Custom Boss Spawner"
  *	- Combined and rewritten the HUD countdown timer and spawn timers
  *	- HUD Timer countdown is now customizable
  *	- Removed a bunch of useless code
@@ -19,13 +20,14 @@
  *	- Fixed issue with plugin not spawning anything at all
  * 	- Fixed Minimum players CVAR not working properly by breaking the plugin
  *	- Fixed issue with CVAR changing commands
- * 	- Renamed plugin to "Custom Boss Spawner"
  *	- Added commands to individually spawn bosses by user cursor
  *	- Added the ability to create custom  bosses
  *	- Custom  bosses allow ability to change health,scale,size,glow,model,weaponmodel, and more
  *	- Redone the whole spawning system core
  *	- Removed Valves default lifetime for Monoculus and Merasmus and implemented a custom one through this plugin
  *	- Reworked Skeleton health management
+ *	- Improved the health bar to be more accurate, 100% hp at full bar and won't create another heathbar near death
+ *	- Hitbox now scales with size (Does not work with skeleton)
  *	============================================================================
  */
 
@@ -35,18 +37,14 @@
 #include <sdkhooks>
 #include <morecolors>
 
-#define PLUGIN_VERSION "4.0.2"
-#define HEALTHBAR_MAX 255
+#define PLUGIN_VERSION "4.0 BETA"
 
-new Handle:Version = 		INVALID_HANDLE;
-new Handle:Mode = 			INVALID_HANDLE;
-new Handle:Time = 			INVALID_HANDLE;
-new Handle:MinPlayers = 	INVALID_HANDLE;
-new Handle:TimerHandle = 	INVALID_HANDLE;
-new Handle:BossTimer = 		INVALID_HANDLE;
-new Handle:hudText = 		INVALID_HANDLE;
+new Handle:cVars[5] = 	{INVALID_HANDLE, ...};
+new Handle:cTimer = 	INVALID_HANDLE;
+new Handle:bTimer = 	INVALID_HANDLE;
+new Handle:hHUD = 		INVALID_HANDLE;
 
-new const String:BossAttributes[124][10][PLATFORM_MAX_PATH];
+new const String:BossAttributes[64][10][124];
 //0 - Name
 //1 - Model
 //2 - Type
@@ -58,7 +56,10 @@ new const String:BossAttributes[124][10][PLATFORM_MAX_PATH];
 //8 - PosFix
 //9 - Lifeline
 
-new g_Time;
+new sMode;
+new sInterval;
+new sMin;
+
 new index_boss = 0;
 new bool:g_Enabled;
 new bossEnt = -1;
@@ -75,20 +76,18 @@ new index_command;
 new bool:s_rand;
 
 public Plugin:myinfo =  {
-	name = "[TF2] Automatic Halloween Boss Spawner",
+	name = "[TF2] Custom Boss Spawner",
 	author = "Tak (chaosxk)",
-	description = "Spawns a boss under a spawn time interval.",
+	description = "Spawns a custom boss with or without a timer.",
 	version = PLUGIN_VERSION,
 	url = "http://www.sourcemod.net"
 }
 
 public OnPluginStart() {
-	//Adjustable Cvars
-	Version = CreateConVar("sm_boss_version", PLUGIN_VERSION, "Halloween Boss Spawner Version", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
-	
-	Mode = CreateConVar("sm_boss_mode", "1", "What spawn mode should boss spawn? (0 - Random ; 1 - Ordered from HHH - Monoculus - Merasmus");
-	Time = CreateConVar("sm_boss_interval", "300", "How many seconds until the next boss spawns?");
-	MinPlayers = CreateConVar("sm_boss_minplayers", "12", "How many players are needed before enabling auto-spawning?");
+	cVars[0] = CreateConVar("sm_boss_version", PLUGIN_VERSION, "Halloween Boss Spawner Version", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
+	cVars[1] = CreateConVar("sm_boss_mode", "1", "What spawn mode should boss spawn? (0 - Random ; 1 - Ordered from HHH - Monoculus - Merasmus");
+	cVars[2] = CreateConVar("sm_boss_interval", "300", "How many seconds until the next boss spawns?");
+	cVars[3] = CreateConVar("sm_boss_minplayers", "12", "How many players are needed before enabling auto-spawning?");
 
 	RegAdminCmd("sm_getcoords", GetCoords, ADMFLAG_GENERIC, "Get the Coordinates of your cursor.");
 	RegAdminCmd("sm_forceboss", ForceSpawn, ADMFLAG_GENERIC, "Forces a boss to spawn");
@@ -96,7 +95,6 @@ public OnPluginStart() {
 	RegAdminCmd("sm_reloadbossconfig", ReloadConfig, ADMFLAG_GENERIC, "Reloads the map setting config");
 	RegAdminCmd("sm_spawn", SpawnBossCommand, ADMFLAG_GENERIC, "Spawns a boss at the position the user is looking at.");
 
-	//Event Hooks
 	HookEvent("teamplay_round_start", RoundStart);
 	HookEvent("pumpkin_lord_summoned", Horse_Summoned, EventHookMode_Pre);
 	HookEvent("pumpkin_lord_killed", Horse_Killed, EventHookMode_Pre);
@@ -107,11 +105,10 @@ public OnPluginStart() {
 	HookEvent("merasmus_escape_warning", Merasmus_Leave, EventHookMode_Pre);
 	HookEvent("eyeball_boss_escape_imminent", Monoculus_Leave, EventHookMode_Pre);
 
-	//Convar Hooks
-	HookConVarChange(Version, cvarChange);
-	HookConVarChange(Time, cvarChange);
-	HookConVarChange(MinPlayers, cvarChange);
-	
+	HookConVarChange(cVars[0], cVarChange);
+	HookConVarChange(cVars[1], cVarChange);
+	HookConVarChange(cVars[2], cVarChange);
+	HookConVarChange(cVars[3], cVarChange);
 	
 	LoadTranslations("common.phrases");
 	LoadTranslations("bossspawner.phrases");
@@ -120,14 +117,19 @@ public OnPluginStart() {
 
 public OnPluginEnd() {
 	RemoveExistingBoss();
+	ClearTimer(cTimer);
 }
 
 public OnConfigsExecuted() {
+	sMode = GetConVarInt(cVars[1]);
+	sInterval = GetConVarInt(cVars[2]);
+	sMin = GetConVarInt(cVars[3]);
 	SetupMapConfigs("bossspawner_maps.cfg");
-	if(!g_Enabled) return;
-	SetupBossConfigs("bossspawner_boss.cfg");
-	FindHealthBar();
-	PrecacheSound("ui/halloween_boss_summoned_fx.wav");
+	if(g_Enabled) {
+		SetupBossConfigs("bossspawner_boss.cfg");
+		FindHealthBar();
+		PrecacheSound("ui/halloween_boss_summoned_fx.wav");
+	}
 }
 
 public RemoveBossLifeline(const String:command[], const String:execute[], duration) {
@@ -139,12 +141,11 @@ public RemoveBossLifeline(const String:command[], const String:execute[], durati
 
 public OnMapEnd() {
 	RemoveExistingBoss();
-	if(!g_Enabled) return;
-	ClearTimer(TimerHandle);
+	ClearTimer(cTimer);
 }
 
 public OnClientPostAdminCheck(client) {
-	if(GetClientCount(true) == GetConVarInt(MinPlayers)) {
+	if(GetClientCount(true) == sMin) {
 		if(bossCounter == 0) {
 			ResetTimer();
 		}
@@ -152,34 +153,46 @@ public OnClientPostAdminCheck(client) {
 }
 
 public OnClientDisconnect(client) {
-	if(GetClientCount(true) < GetConVarInt(MinPlayers)) {
+	if(GetClientCount(true) < sMin) {
 		RemoveExistingBoss();
-		ClearTimer(TimerHandle);
+		ClearTimer(cTimer);
 	}
 }
 
-public cvarChange(Handle:convar, String:oldValue[], String:newValue[]) {
-	if(convar == Version) {
-		SetConVarString(Version, newValue, false, false);
+public cVarChange(Handle:convar, String:oldValue[], String:newValue[]) {
+	if (StrEqual(oldValue, newValue, true))
+		return;
+	
+	new iNewValue = StringToInt(newValue);
+
+	if(convar == cVars[0])  {
+		SetConVarString(cVars[0], PLUGIN_VERSION);
 	}
-	else if((convar == Time) || (convar == MinPlayers)) {
-		if(GetClientCount(true) >= GetConVarInt(MinPlayers)) {
+	else if(convar == cVars[1]) {
+		sMode = iNewValue;
+	}
+	else if((convar == cVars[2]) || (convar == cVars[3])) {
+		if(convar == cVars[2]) sInterval = iNewValue;
+		else sMin = iNewValue;
+		
+		if(GetClientCount(true) >= sMin) {
 			if(bossCounter == 0) {
 				ResetTimer();
 			}
 		}
 		else {
 			RemoveExistingBoss();
-			ClearTimer(TimerHandle);
+			ClearTimer(cTimer);
 		}
 	}
 }
 
+/* -----------------------------------EVENT HANDLES-----------------------------------*/
 public Action:RoundStart(Handle:event, const String:name[], bool:dontBroadcast) {
 	bossCounter = 0;
 	if(!g_Enabled) return Plugin_Continue;
-	ClearTimer(TimerHandle);
-	if(GetClientCount(true) >= GetConVarInt(MinPlayers)) {
+	ClearTimer(cTimer);
+	if(GetClientCount(true) >= sMin) {
 		if(bossCounter == 0) {
 			ResetTimer();
 		}
@@ -232,42 +245,20 @@ public Action:Monoculus_Leave(Handle:event, const String:name[], bool:dontBroadc
 	if(!g_Enabled) return Plugin_Continue;
 	return Plugin_Handled;
 }
+/* -----------------------------------EVENT HANDLES-----------------------------------*/
 
-public OnEntityDestroyed(ent) {
-	if(g_Enabled) {
-		if(IsValidEntity(ent) && ent > MaxClients) {
-			decl String:classname[MAX_NAME_LENGTH];
-			GetEntityClassname(ent, classname, sizeof(classname));
-			if(ent == bossEnt) {
-				bossEnt = -1;
-				bossCounter = 0;
-				if(bossCounter == 0) {
-					CPrintToChatAll("%t", "Time", RoundFloat(GetConVarFloat(Time)));
-					hudTimer();
-				}
-				ClearTimer(BossTimer);
-			}
-			if(ent == g_trackent) {
-				g_trackent = FindEntityByClassname(-1, "merasmus");
-				if (g_trackent == ent) {
-					g_trackent = FindEntityByClassname(ent, "merasmus");
-				}
-					
-				if (g_trackent > -1) {
-					SDKHook(g_trackent, SDKHook_OnTakeDamagePost, OnBossDamaged);
-				}
-				UpdateBossHealth(g_trackent);
-			}
-		}
-	}
-}
+/* ---------------------------------COMMAND FUNCTION----------------------------------*/
 
 public Action:ForceSpawn(client, args) {
 	if(!g_Enabled) return Plugin_Handled;
+	if(bossCounter != 0) {
+		CReplyToCommand(client, "%t", "Boss_Active");
+		return Plugin_Handled;
+	}
 	new String:arg[32];
 	GetCmdArg(1, arg, sizeof(arg));
 	if(bossCounter == 0) {
-		ClearTimer(TimerHandle);
+		ClearTimer(cTimer);
 		SpawnBoss();
 	}
 	else {
@@ -289,38 +280,38 @@ public Action:GetCoords(client, args) {
 }
 
 public Action:SlayBoss(client, args) {
-	if(!g_Enabled) return Plugin_Handled;
+	if(!g_Enabled) {
+		ReplyToCommand(client, "[Boss] Custom Boss Spawner is disabled.");
+		return Plugin_Handled;
+	}
 	new ent = -1;
 	while((ent = FindEntityByClassname(ent, "headless_hatman")) != -1) {
 		if(IsValidEntity(ent)) {
 			AcceptEntityInput(ent, "Kill");
-			CPrintToChatAll("%t", "Horseman_Slain");
 		}
 	}
 	while((ent = FindEntityByClassname(ent, "eyeball_boss")) != -1) {
 		if(IsValidEntity(ent)) {
 			AcceptEntityInput(ent, "Kill");
-			CPrintToChatAll("%t", "Eyeball_Slain");
 		}
 	}
 	while((ent = FindEntityByClassname(ent, "merasmus")) != -1) {
 		if(IsValidEntity(ent)) {
 			AcceptEntityInput(ent, "Kill");
-			CPrintToChatAll("%t", "Merasmus_Slain");
 		}
 	}
 	while((ent = FindEntityByClassname(ent, "tf_zombie")) != -1) {
 		if(IsValidEntity(ent)) {
 			AcceptEntityInput(ent, "Kill");
-			CPrintToChatAll("%t", "Skeleton_Slain");
 		}
 	}
+	CPrintToChatAll("%t", "Boss_Slain");
 	//OnEntityDestroyed(bossEnt);
 	return Plugin_Handled;
 }
 
 public Action:ReloadConfig(client, args) {
-	ClearTimer(TimerHandle);
+	ClearTimer(cTimer);
 	SetupMapConfigs("bossspawner_maps.cfg");
 	if(g_Enabled) {
 		SetupMapConfigs("bossspawner_boss.cfg");
@@ -347,7 +338,7 @@ public Action:SpawnBossCommand(client, args) {
 	GetCmdArg(1, arg, sizeof(arg));
 	new i;
 	for(i = 0; i < max_boss; i++) {
-		if(StrEqual(BossAttributes[i][0], arg)){
+		if(StrEqual(BossAttributes[i][0], arg, false)){
 			break;
 		}
 	}
@@ -357,7 +348,7 @@ public Action:SpawnBossCommand(client, args) {
 	}
 	index_command = i;
 	ActiveTimer = false;
-	CreateBoss(index_command);
+	CreateBoss(index_command, k_pos);
 	return Plugin_Handled;
 }
 
@@ -394,176 +385,76 @@ SetTeleportEndPoint(client) {
 public bool:TraceentFilterPlayer(ent, contentsMask) {
 	return ent > GetMaxClients() || !ent;
 }
+/* ---------------------------------COMMAND FUNCTION----------------------------------*/
 
-//random or ordered spawn manager
-SpawnBoss() {
-	new mode = GetConVarInt(Mode);
+/* --------------------------------BOSS SPAWNING CORE---------------------------------*/
+public SpawnBoss() {
 	ActiveTimer = true;
-	if(mode == 0) {
+	if(sMode == 0) {
 		s_rand = true;
 		index_boss = GetRandomInt(0, max_boss-1);
-		PrintToChatAll("%d", index_boss);
-		CreateBoss(index_boss);
+		CreateBoss(index_boss, g_pos);
 	}
-	else if(mode == 1) {
+	else if(sMode == 1) {
 		s_rand = false;
-		CreateBoss(index_boss);
+		CreateBoss(index_boss, g_pos);
 		index_boss++;
 		if(index_boss > max_boss-1) index_boss = 0;
 	}
 }
 
-CreateBoss(b_index) {
-	if(StrEqual(BossAttributes[b_index][2], "Horseman")) {
-		new ent = CreateEntityByName("headless_hatman");
-		if(IsValidEntity(ent)) {
-			new playerCounter = GetClientCount(true);
-			new BaseHP = StringToInt(BossAttributes[b_index][3]);
-			new ScaleHP = StringToInt(BossAttributes[b_index][4]);
-			SetEntProp(ent, Prop_Data, "m_iHealth", BaseHP + ScaleHP*playerCounter);
-			SetEntProp(ent, Prop_Data, "m_iMaxHealth", BaseHP + ScaleHP*playerCounter);
-			new Float:temp[3];
-			temp = g_pos;
-			temp[2] += StringToFloat(BossAttributes[b_index][8]);
-			TeleportEntity(ent, temp, NULL_VECTOR, NULL_VECTOR);
-			DispatchSpawn(ent);
-			if(!StrEqual(BossAttributes[b_index][1], NULL_STRING)) {
-				SetEntityModel(ent, BossAttributes[b_index][1]);
-			}
-			if(ActiveTimer == true) {
-				bossCounter = 1;
-				bossEnt = ent;
-			}
-			SetSize(StringToFloat(BossAttributes[b_index][6]), ent);
-			SetGlow(StrEqual(BossAttributes[b_index][7], "Yes") ? 1 : 0, ent);
-			BossTimer = CreateTimer(StringToFloat(BossAttributes[b_index][9]), RemoveBoss);
-		}
-	}
-	else if(StrEqual(BossAttributes[b_index][2], "Monoculus")) {
-		new ent = CreateEntityByName("eyeball_boss");
-		if(IsValidEntity(ent)) {
-			new playerCounter = GetClientCount(true);
-			new BaseHP = StringToInt(BossAttributes[b_index][3]);
-			new ScaleHP = StringToInt(BossAttributes[b_index][4]);
-			SetEntProp(ent, Prop_Data, "m_iTeamNum", 5);
-			SetEntProp(ent, Prop_Data, "m_iHealth", BaseHP + ScaleHP*playerCounter);
-			SetEntProp(ent, Prop_Data, "m_iMaxHealth", BaseHP + ScaleHP*playerCounter);
-			new Float:temp[3];
-			temp = g_pos;
-			temp[2] += StringToFloat(BossAttributes[b_index][8]);
-			TeleportEntity(ent, temp, NULL_VECTOR, NULL_VECTOR);
-			DispatchSpawn(ent);
-			if(!StrEqual(BossAttributes[b_index][1], NULL_STRING)) {
-				SetEntityModel(ent, BossAttributes[b_index][1]);
-			}
-			if(ActiveTimer == true) {
-				bossCounter = 1;
-				bossEnt = ent;
-			}
-			SetSize(StringToFloat(BossAttributes[b_index][6]), ent);
-			SetGlow(StrEqual(BossAttributes[b_index][7], "Yes") ? 1 : 0, ent);
-			BossTimer = CreateTimer(StringToFloat(BossAttributes[b_index][9]), RemoveBoss);
-		}
-	}
-	else if(StrEqual(BossAttributes[b_index][2], "Merasmus")) {
-		new ent = CreateEntityByName("merasmus");
-		if(IsValidEntity(ent)) {
-			new playerCounter = GetClientCount(true);
-			new BaseHP = StringToInt(BossAttributes[b_index][3]);
-			new ScaleHP = StringToInt(BossAttributes[b_index][4]);
-			SetEntProp(ent, Prop_Data, "m_iTeamNum", 5);
-			SetEntProp(ent, Prop_Data, "m_iHealth", BaseHP + ScaleHP*playerCounter);
-			SetEntProp(ent, Prop_Data, "m_iMaxHealth", BaseHP + ScaleHP*playerCounter);
-			new Float:temp[3];
-			temp = g_pos;
-			temp[2] += StringToFloat(BossAttributes[b_index][8]);
-			TeleportEntity(ent, temp, NULL_VECTOR, NULL_VECTOR);
-			DispatchSpawn(ent);
-			if(!StrEqual(BossAttributes[b_index][1], NULL_STRING)) {
-				SetEntityModel(ent, BossAttributes[b_index][1]);
-			}
-			if(ActiveTimer == true) {
-				bossCounter = 1;
-				bossEnt = ent;
-			}
-			SetSize(StringToFloat(BossAttributes[b_index][6]), ent);
-			SetGlow(StrEqual(BossAttributes[b_index][7], "Yes") ? 1 : 0, ent);
-			BossTimer = CreateTimer(StringToFloat(BossAttributes[b_index][9]), RemoveBoss);
-		}
-	}
-	else if(StrEqual(BossAttributes[b_index][2], "Skeleton")) {
-		new ent = CreateEntityByName("tf_zombie_spawner");
-		if(IsValidEntity(ent)) {
+public CreateBoss(b_index, Float:ipos[3]) {
+	decl String:ent_class[32];
+	strcopy(ent_class, sizeof(ent_class), BossAttributes[b_index][2]);
+	new ent = CreateEntityByName(ent_class);
+	if(IsValidEntity(ent)) {
+		if(StrEqual(ent_class, "tf_zombie_spawner")) {
 			SetEntProp(ent, Prop_Data, "m_nSkeletonType", 1);
 			new Float:temp[3];
-			temp = g_pos;
+			temp = ipos;
 			temp[2] += StringToFloat(BossAttributes[b_index][8]);
-			TeleportEntity(ent, g_pos, NULL_VECTOR, NULL_VECTOR);
+			TeleportEntity(ent, temp, NULL_VECTOR, NULL_VECTOR);
 			DispatchSpawn(ent);
 			EmitSoundToAll("ui/halloween_boss_summoned_fx.wav");
 			SpawnEnt = ent;
 			queueBoss = true;
 			AcceptEntityInput(ent, "Enable");
+			return;
 		}
+		new playerCounter = GetClientCount(true);
+		new BaseHP = StringToInt(BossAttributes[b_index][3]);
+		new ScaleHP = StringToInt(BossAttributes[b_index][4]);
+		new sHealth = (BaseHP + ScaleHP*playerCounter)*10;
+		if(StrEqual(ent_class, "eyeball_boss")) SetEntProp(ent, Prop_Data, "m_iTeamNum", 5);
+		new Float:temp[3];
+		temp = ipos;
+		temp[2] += StringToFloat(BossAttributes[b_index][8]);
+		TeleportEntity(ent, temp, NULL_VECTOR, NULL_VECTOR);
+		DispatchSpawn(ent);
+		SetEntProp(ent, Prop_Data, "m_iHealth", sHealth);
+		SetEntProp(ent, Prop_Data, "m_iMaxHealth", sHealth);
+		EmitSoundToAll("ui/halloween_boss_summoned_fx.wav");
+		if(!StrEqual(BossAttributes[b_index][1], NULL_STRING)) {
+			SetEntityModel(ent, BossAttributes[b_index][1]);
+		}
+		if(ActiveTimer == true) {
+			bossCounter = 1;
+			bossEnt = ent;
+			bTimer = CreateTimer(StringToFloat(BossAttributes[b_index][9]), RemoveTimer, b_index);
+		}
+		SetSize(StringToFloat(BossAttributes[b_index][6]), ent);
+		SetGlow(StrEqual(BossAttributes[b_index][7], "Yes") ? 1 : 0, ent);
 	}
 }
 
-public Action:RemoveBoss(Handle:hTimer) {
+public Action:RemoveTimer(Handle:hTimer, any:b_index) {
 	if(IsValidEntity(bossEnt)) {
+		CPrintToChatAll("%t", "Boss_Left", BossAttributes[b_index][0]);
+		CPrintToChatAll("[Boss] %s has left due to boredom.", BossAttributes[b_index][0]);
 		AcceptEntityInput(bossEnt, "Kill");
-		CPrintToChatAll("%t", "Horseman_Left");
+		bossCounter = 0;
 	}
 	return Plugin_Handled;
-}
-
-
-SetGlow(value, ent) {
-	if(IsValidEntity(ent)) {
-		SetEntProp(ent, Prop_Send, "m_bGlowEnabled", value);
-	}
-}
-
-SetSize(Float:value, ent) {
-	if(IsValidEntity(ent)) {
-		SetEntPropFloat(ent, Prop_Send, "m_flModelScale", value);
-	}
-}
-
-ResetTimer() {
-	if(bossCounter == 0) {
-		CPrintToChatAll("%t", "Time", RoundFloat(GetConVarFloat(Time)));
-		ClearTimer(TimerHandle);
-		hudTimer();
-	}
-}
-
-public hudTimer() {
-	if(!g_Enabled) return;
-	g_Time = GetConVarInt(Time);
-	if(hudText != INVALID_HANDLE) {
-		for(new i = 1; i <= MaxClients; i++) {
-			if(IsClientInGame(i))
-				ClearSyncHud(i, hudText);
-		}
-		CloseHandle(hudText);
-	}
-	hudText = CreateHudSynchronizer();
-	SetHudTextParams(0.05, 0.05, 1.0, 255, 255, 255, 255);
-	TimerHandle = CreateTimer(1.0, HUDCountDown, _, TIMER_REPEAT);
-}
-
-public Action:HUDCountDown(Handle:hTimer) {
-	g_Time--;
-	for(new i = 1; i <= MaxClients; i++) {
-		if(IsClientInGame(i)) {
-			ShowSyncHudText(i, hudText, "Boss: %d seconds", g_Time);
-		}
-	}
-	if(g_Time <= 0) {
-		SpawnBoss();
-		return Plugin_Stop;
-	}
-	return Plugin_Continue;
 }
 
 //remove existing boss that has the same targetname so that it doesn't cause an extra spawn point
@@ -574,33 +465,122 @@ RemoveExistingBoss() {
 	}
 }
 
-FindHealthBar() {
-	g_healthBar = FindEntityByClassname(-1, "monster_resource");
-	if(g_healthBar == -1) {
-		g_healthBar = CreateEntityByName("monster_resource");
-		if(g_healthBar != -1) {
-			DispatchSpawn(g_healthBar);
-		}
+SetGlow(value, ent) {
+	if(IsValidEntity(ent)) {
+		SetEntProp(ent, Prop_Send, "m_bGlowEnabled", value);
 	}
 }
 
+SetSize(Float:value, ent) {
+	if(IsValidEntity(ent)) {
+		SetEntPropFloat(ent, Prop_Send, "m_flModelScale", value);
+		ResizeHitbox(ent, value);
+	}
+}
+
+//Taken from r3dw3r3w0lf
+ResizeHitbox(entity, Float:fScale = 1.0) {
+	decl Float:vecBossMin[3], Float:vecBossMax[3];	
+	GetEntPropVector(entity, Prop_Send, "m_vecMins", vecBossMin);
+	GetEntPropVector(entity, Prop_Send, "m_vecMaxs", vecBossMax);
+	
+	decl Float:vecScaledBossMin[3], Float:vecScaledBossMax[3];
+	
+	vecScaledBossMin = vecBossMin;
+	vecScaledBossMax = vecBossMax;
+	
+	ScaleVector(vecScaledBossMin, fScale);
+	ScaleVector(vecScaledBossMax, fScale);
+	SetEntPropVector(entity, Prop_Send, "m_vecMins", vecScaledBossMin);
+	SetEntPropVector(entity, Prop_Send, "m_vecMaxs", vecScaledBossMax);
+}
+/* --------------------------------BOSS SPAWNING CORE---------------------------------*/
+
+/* ---------------------------------TIMER & HUD CORE----------------------------------*/
+public hudTimer() {
+	if(!g_Enabled) return;
+	sInterval = GetConVarInt(cVars[2]);
+	if(hHUD != INVALID_HANDLE) {
+		for(new i = 1; i <= MaxClients; i++) {
+			if(IsClientInGame(i))
+				ClearSyncHud(i, hHUD);
+		}
+		CloseHandle(hHUD);
+	}
+	hHUD = CreateHudSynchronizer();
+	SetHudTextParams(0.05, 0.05, 1.0, 255, 255, 255, 255);
+	cTimer = CreateTimer(1.0, HUDCountDown, _, TIMER_REPEAT);
+}
+
+public Action:HUDCountDown(Handle:hTimer) {
+	sInterval--;
+	for(new i = 1; i <= MaxClients; i++) {
+		if(IsClientInGame(i)) {
+			ShowSyncHudText(i, hHUD, "Boss: %d seconds", sInterval);
+		}
+	}
+	if(sInterval <= 0) {
+		SpawnBoss();
+		return Plugin_Stop;
+	}
+	return Plugin_Continue;
+}
+
+ResetTimer() {
+	if(bossCounter == 0) {
+		CPrintToChatAll("%t", "Time", sInterval);
+		ClearTimer(cTimer);
+		hudTimer();
+	}
+}
+/* ---------------------------------TIMER & HUD CORE----------------------------------*/
+
+/* ---------------------------------ENTITY MANAGEMENT---------------------------------*/
 public OnEntityCreated(ent, const String:classname[]) {
 	if (StrEqual(classname, "monster_resource")) {
 		g_healthBar = ent;
 	}
-	else if(g_trackent == -1 && (StrEqual(classname, "headless_hatman") || StrEqual(classname, "merasmus") || StrEqual(classname, "headless_hatman"))) {
+	else if(g_trackent == -1 && (StrEqual(classname, "headless_hatman") || StrEqual(classname, "eyeball_boss") || StrEqual(classname, "merasmus"))) {
 		g_trackent = ent;
 		SDKHook(ent, SDKHook_SpawnPost, UpdateBossHealth);
-		SDKHook(ent, SDKHook_OnTakeDamage, OnBossDamaged);
+		SDKHook(ent, SDKHook_OnTakeDamagePost, OnBossDamaged);
 	}
 	if(StrEqual(classname, "tf_zombie") && queueBoss == true) {
 		g_trackent = ent;
 		RequestFrame(OnSkeletonSpawn, EntIndexToEntRef(ent));
 		SDKHook(ent, SDKHook_SpawnPost, UpdateBossHealth);
-		SDKHook(ent, SDKHook_OnTakeDamage, OnBossDamaged);
+		SDKHook(ent, SDKHook_OnTakeDamagePost, OnBossDamaged);
 	}
 	if(StrEqual(classname, "prop_dynamic")) {
 		RequestFrame(OnPropSpawn, EntIndexToEntRef(ent));
+	}
+}
+
+public OnEntityDestroyed(ent) {
+	if(g_Enabled) {
+		if(IsValidEntity(ent) && ent > MaxClients) {
+			decl String:classname[MAX_NAME_LENGTH];
+			GetEntityClassname(ent, classname, sizeof(classname));
+			if(ent == bossEnt) {
+				bossEnt = -1;
+				bossCounter = 0;
+				if(bossCounter == 0) {
+					hudTimer();
+					CPrintToChatAll("%t", "Time", sInterval);
+				}
+			}
+			if(ent == g_trackent) {
+				g_trackent = FindEntityByClassname(-1, "merasmus");
+				if (g_trackent == ent) {
+					g_trackent = FindEntityByClassname(ent, "merasmus");
+				}
+					
+				if (g_trackent > -1) {
+					SDKHook(g_trackent, SDKHook_OnTakeDamagePost, OnBossDamaged);
+				}
+				UpdateBossHealth(g_trackent);
+			}
+		}
 	}
 }
 
@@ -616,14 +596,15 @@ public OnSkeletonSpawn(any:ref) {
 		new playerCounter = GetClientCount(true);
 		new BaseHP = StringToInt(BossAttributes[temp_index][3]);
 		new ScaleHP = StringToInt(BossAttributes[temp_index][4]);
-		SetEntProp(ent, Prop_Data, "m_iHealth", BaseHP + ScaleHP*playerCounter);
-		SetEntProp(ent, Prop_Data, "m_iMaxHealth", BaseHP + ScaleHP*playerCounter);
+		new sHealth = (BaseHP + ScaleHP*playerCounter)*10;
+		SetEntProp(ent, Prop_Data, "m_iHealth", sHealth);
+		SetEntProp(ent, Prop_Data, "m_iMaxHealth", sHealth);
 		if(ActiveTimer == true) {
 			bossCounter = 1;
 			bossEnt = ent;
 		}
 		AcceptEntityInput(SpawnEnt, "kill");
-		BossTimer = CreateTimer(StringToFloat(BossAttributes[temp_index][9]), RemoveBoss);
+		bTimer = CreateTimer(StringToFloat(BossAttributes[temp_index][9]), RemoveTimer);
 		CPrintToChatAll("%t", "Skeleton_Spawn");
 		UpdateSkeleton(ent, temp_index);
 		queueBoss = false;
@@ -667,42 +648,41 @@ UpdateSkeleton(ent, temp_index) {
 	}
 }  
 
-public Action:OnBossDamaged(victim, &attacker, &inflictor, &Float:damage, &damagetype) {
-	UpdateBossHealth(victim);
-	UpdateDeathEvent(victim);
-}
-
-public UpdateDeathEvent(ent) {
-	if(IsValidEntity(ent)) {
-		new maxHP = GetEntProp(ent, Prop_Data, "m_iMaxHealth");
-		new HP = GetEntProp(ent, Prop_Data, "m_iHealth");
-		if(HP <= (maxHP * 0.75)) {
-			SetEntProp(ent, Prop_Data, "m_iHealth", 0);
-			if(HP <= -1) {
-				SetEntProp(ent, Prop_Data, "m_takedamage", 0);
-			}
+FindHealthBar() {
+	g_healthBar = FindEntityByClassname(-1, "monster_resource");
+	if(g_healthBar == -1) {
+		g_healthBar = CreateEntityByName("monster_resource");
+		if(g_healthBar != -1) {
+			DispatchSpawn(g_healthBar);
 		}
 	}
+}
+
+public Action:OnBossDamaged(victim, &attacker, &inflictor, &Float:damage, &damagetype) {
+	UpdateBossHealth(victim);
 }
 
 public UpdateBossHealth(ent) {
-	if(g_healthBar == -1) {
-		return;
-	}
+	if (g_healthBar == -1) return;
 	new percentage;
 	if(IsValidEntity(ent)) {
-		new maxHP = GetEntProp(ent, Prop_Data, "m_iMaxHealth");
 		new HP = GetEntProp(ent, Prop_Data, "m_iHealth");
-		if(HP <= 0) {
+		new maxHP = GetEntProp(ent, Prop_Data, "m_iMaxHealth");
+		if(HP <= (maxHP * 0.9)) {
+			SetEntProp(ent, Prop_Data, "m_iHealth", 0);
+			ClearTimer(bTimer);
+			if(HP <= -1) {
+				SetEntProp(ent, Prop_Data, "m_takedamage", 0);
+			}
 			percentage = 0;
 		}
 		else {
-			percentage = RoundToCeil((float(HP) / float(maxHP / 4)) * 255);
+			percentage = RoundToCeil((float(HP) / float(maxHP / 10)) * 255.9);	//max 255.9 accurate at 100%
 		}
 	}
 	else {
 		percentage = 0;
-	}	
+	}
 	SetEntProp(g_healthBar, Prop_Send, "m_iBossHealthPercentageByte", percentage);
 }
 
@@ -712,7 +692,9 @@ public ClearTimer(&Handle:timer) {
 	}  
 	timer = INVALID_HANDLE;  
 }  
+/* ---------------------------------ENTITY MANAGEMENT---------------------------------*/
 
+/* ---------------------------------CONFIG MANAGEMENT---------------------------------*/
 public SetupMapConfigs(const String:sFile[]) {
 	new String:sPath[PLATFORM_MAX_PATH]; 
 	BuildPath(Path_SM, sPath, sizeof(sPath), "configs/%s", sFile);
@@ -757,9 +739,9 @@ public SetupMapConfigs(const String:sFile[]) {
 	LogMessage("Map: %s, Enabled: %s, Position:%f, %f, %f", currentMap, mapEnabled ? "Yes" : "No", g_pos[0],g_pos[1],g_pos[2]);
 	if(mapEnabled != 0) {
 		g_Enabled = true;
-		if(GetClientCount(true) >= GetConVarInt(MinPlayers)) {
-			CPrintToChatAll("%t", "Time", RoundFloat(GetConVarFloat(Time)));
+		if(GetClientCount(true) >= sMin) {
 			hudTimer();
+			CPrintToChatAll("%t", "Time", sInterval);
 		}
 	}
 	else if(mapEnabled == 0) {
@@ -792,29 +774,29 @@ public SetupBossConfigs(const String:sFile[]) {
 		KvGetString(kv, "Glow", BossAttributes[b_index][7], sizeof(BossAttributes[][]), "Yes");
 		KvGetString(kv, "PosFix", BossAttributes[b_index][8], sizeof(BossAttributes[][]), "0.0");
 		KvGetString(kv, "Lifetime", BossAttributes[b_index][9], sizeof(BossAttributes[][]), "120");
-		if(StrEqual(BossAttributes[b_index][2], "Skeleton") && !StrEqual(BossAttributes[b_index][1], NULL_STRING)) {
-			if(StrEqual(BossAttributes[b_index][2], "Skeleton")) {
+		if(StrEqual(BossAttributes[b_index][2], "tf_zombie_spawner") && !StrEqual(BossAttributes[b_index][1], NULL_STRING)) {
+			if(StrEqual(BossAttributes[b_index][2], "tf_zombie_spawner")) {
 				LogError("Skeleton type is not supported.");
 				SetFailState("Skeleton type is not supported.");
 			}
 		}
-		if(!StrEqual(BossAttributes[b_index][2], "Horseman") && !StrEqual(BossAttributes[b_index][2], "Monoculus") && !StrEqual(BossAttributes[b_index][2], "Merasmus") && !StrEqual(BossAttributes[b_index][2], "Skeleton")){
+		if(!StrEqual(BossAttributes[b_index][2], "headless_hatman") && !StrEqual(BossAttributes[b_index][2], "eyeball_boss") && !StrEqual(BossAttributes[b_index][2], "merasmus") && !StrEqual(BossAttributes[b_index][2], "tf_zombie_spawner")){
 			LogError("Type is undetermined, please check boss type again.");
 			SetFailState("Type is undetermined, please check boss type again.");
 		}
-		if(StrEqual(BossAttributes[b_index][2], "Monoculus")) {
+		if(StrEqual(BossAttributes[b_index][2], "eyeball_boss")) {
 			RemoveBossLifeline("tf_eyeball_boss_lifetime", "tf_eyeball_boss_lifetime", StringToInt(BossAttributes[b_index][9])+1);
 		}
-		else if(StrEqual(BossAttributes[b_index][2], "Merasmus")) {
+		else if(StrEqual(BossAttributes[b_index][2], "merasmus")) {
 			RemoveBossLifeline("tf_merasmus_lifetime", "tf_merasmus_lifetime", StringToInt(BossAttributes[b_index][9])+1);
 		}
 		if(!StrEqual(BossAttributes[b_index][1], NULL_STRING)) {
 			PrecacheModel(BossAttributes[b_index][1], true);
 		}
-		if(!StrEqual(BossAttributes[b_index][2], "Horseman")) {
+		if(!StrEqual(BossAttributes[b_index][2], "headless_hatman")) {
 			if(!StrEqual(BossAttributes[b_index][5], NULL_STRING)) {
-				LogError("Weapon model can only be changed on Type:Horseman");
-				SetFailState("Weapon model can only be changed on Type:Horseman");
+				LogError("Weapon model can only be changed on Type:headless_hatman");
+				SetFailState("Weapon model can only be changed on Type:headless_hatman");
 			}
 		}
 		else if(!StrEqual(BossAttributes[b_index][5], NULL_STRING)) {
@@ -828,3 +810,6 @@ public SetupBossConfigs(const String:sFile[]) {
 	CloseHandle(kv);
 	LogMessage("Loaded Boss configs successfully."); 
 }
+/* ---------------------------------CONFIG MANAGEMENT---------------------------------*/
+
+/* ----------------------------------------END----------------------------------------*/
