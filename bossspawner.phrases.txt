@@ -1,0 +1,34 @@
+"Phrases"
+{
+	"Time"
+	{
+		"#format"	"{1:d}"
+		"en"		"{unusual}[Spawner] {default}The next boss will spawn in {unusual}{1} {default}seconds."
+	}
+	"Boss_Spawn"
+	{
+		"#format"	"{1:s}"
+		"en"		"{unusual}[Spawner] {default}{1} has spawned!"
+	}
+	"Boss_Slain"
+	{
+		"en"		"{unusual}[Spawner] {default}All bosses have been slain!"
+	}
+	"No_Boss"
+	{
+		"en"		"{unusual}[Spawner] {default}No active boss to slay."
+	}
+	"Boss_Left"
+	{
+		"#format"	"{1:s}"
+		"en"		"{unusual}[Spawner] {default}{1} has left due to boredom."
+	}
+	"Boss_Active"
+	{
+		"en"		"{unusual}[Spawner] {default}A boss is already active!"
+	}
+	"Error"
+	{
+		"en"		"Error: You must be alive or in game to use this command!"
+	}
+}

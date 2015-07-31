@@ -3,31 +3,19 @@
  *	
  *	[TF2] Custom Boss Spawner
  *	Alliedmodders: http://forums.alliedmods.net/member.php?u=87026
- *	Current Version: 4.0 BETA
+ *	Current Version: 4.1
  *
  *	This plugin is FREE and can be distributed to anyone.  
  *	If you have paid for this plugin, get your money back.
  *	
  *	Version Log:
- *	v.4.0 BETA
- * 	- Renamed plugin to "Custom Boss Spawner"
- *	- Combined and rewritten the HUD countdown timer and spawn timers
- *	- HUD Timer countdown is now customizable
- *	- Removed a bunch of useless code
- *	- Fixed a bunch of stack timer errors
- *	- Fixed issue with timer not counting down by 1 interval seconds
- *	- Fixed issue with 2+ bosses spawning the same time
- *	- Fixed issue with plugin not spawning anything at all
- * 	- Fixed Minimum players CVAR not working properly by breaking the plugin
- *	- Fixed issue with CVAR changing commands
- *	- Added commands to individually spawn bosses by user cursor
- *	- Added the ability to create custom  bosses
- *	- Custom  bosses allow ability to change health,scale,size,glow,model,weaponmodel, and more
- *	- Redone the whole spawning system core
- *	- Removed Valves default lifetime for Monoculus and Merasmus and implemented a custom one through this plugin
- *	- Reworked Skeleton health management
- *	- Improved the health bar to be more accurate, 100% hp at full bar and won't create another heathbar near death
- *	- Hitbox now scales with size (Does not work with skeleton)
+ *	v.4.1
+ *	- Fixed translations files typo
+ *	- Added boss spawn notification
+ *	- Little fix on reload boss config command
+ *	- Fixed HUD display conflicting with other plugins
+ *	- Added boss custom spawn location: "position" key
+ *	- Added ability to change HUD location
  *	============================================================================
  */
 
@@ -37,14 +25,14 @@
 #include <sdkhooks>
 #include <morecolors>
 
-#define PLUGIN_VERSION "4.0 BETA"
+#define PLUGIN_VERSION "4.1"
 
-new Handle:cVars[5] = 	{INVALID_HANDLE, ...};
+new Handle:cVars[6] = 	{INVALID_HANDLE, ...};
 new Handle:cTimer = 	INVALID_HANDLE;
 new Handle:bTimer = 	INVALID_HANDLE;
 new Handle:hHUD = 		INVALID_HANDLE;
 
-new const String:BossAttributes[64][10][124];
+new const String:BossAttributes[64][11][124];
 //0 - Name
 //1 - Model
 //2 - Type
@@ -57,8 +45,10 @@ new const String:BossAttributes[64][10][124];
 //9 - Lifeline
 
 new sMode;
-new sInterval;
-new sMin;
+new Float:sInterval;
+new Float:sMin;
+new Float:sHUDx;
+new Float:sHUDy;
 
 new index_boss = 0;
 new bool:g_Enabled;
@@ -88,6 +78,8 @@ public OnPluginStart() {
 	cVars[1] = CreateConVar("sm_boss_mode", "1", "What spawn mode should boss spawn? (0 - Random ; 1 - Ordered from HHH - Monoculus - Merasmus");
 	cVars[2] = CreateConVar("sm_boss_interval", "300", "How many seconds until the next boss spawns?");
 	cVars[3] = CreateConVar("sm_boss_minplayers", "12", "How many players are needed before enabling auto-spawning?");
+	cVars[4] = CreateConVar("sm_boss_hud_x", "0.05", "X-Coordinate of the HUD display.");
+	cVars[5] = CreateConVar("sm_boss_hud_y", "0.05", "Y-Coordinate of the HUD display");
 
 	RegAdminCmd("sm_getcoords", GetCoords, ADMFLAG_GENERIC, "Get the Coordinates of your cursor.");
 	RegAdminCmd("sm_forceboss", ForceSpawn, ADMFLAG_GENERIC, "Forces a boss to spawn");
@@ -109,6 +101,8 @@ public OnPluginStart() {
 	HookConVarChange(cVars[1], cVarChange);
 	HookConVarChange(cVars[2], cVarChange);
 	HookConVarChange(cVars[3], cVarChange);
+	HookConVarChange(cVars[4], cVarChange);
+	HookConVarChange(cVars[5], cVarChange);
 	
 	LoadTranslations("common.phrases");
 	LoadTranslations("bossspawner.phrases");
@@ -122,8 +116,10 @@ public OnPluginEnd() {
 
 public OnConfigsExecuted() {
 	sMode = GetConVarInt(cVars[1]);
-	sInterval = GetConVarInt(cVars[2]);
-	sMin = GetConVarInt(cVars[3]);
+	sInterval = GetConVarFloat(cVars[2]);
+	sMin = GetConVarFloat(cVars[3]);
+	sHUDx = GetConVarFloat(cVars[4]);
+	sHUDy = GetConVarFloat(cVars[5]);
 	SetupMapConfigs("bossspawner_maps.cfg");
 	if(g_Enabled) {
 		SetupBossConfigs("bossspawner_boss.cfg");
@@ -163,13 +159,13 @@ public cVarChange(Handle:convar, String:oldValue[], String:newValue[]) {
 	if (StrEqual(oldValue, newValue, true))
 		return;
 	
-	new iNewValue = StringToInt(newValue);
+	new Float:iNewValue = StringToFloat(newValue);
 
 	if(convar == cVars[0])  {
 		SetConVarString(cVars[0], PLUGIN_VERSION);
 	}
 	else if(convar == cVars[1]) {
-		sMode = iNewValue;
+		sMode = RoundFloat(iNewValue);
 	}
 	else if((convar == cVars[2]) || (convar == cVars[3])) {
 		if(convar == cVars[2]) sInterval = iNewValue;
@@ -184,6 +180,12 @@ public cVarChange(Handle:convar, String:oldValue[], String:newValue[]) {
 			RemoveExistingBoss();
 			ClearTimer(cTimer);
 		}
+	}
+	else if(convar == cVars[4]) {
+		sHUDx = iNewValue;
+	}
+	else if(convar == cVars[5]) {
+		sHUDy = iNewValue;
 	}
 }
 
@@ -313,10 +315,8 @@ public Action:SlayBoss(client, args) {
 public Action:ReloadConfig(client, args) {
 	ClearTimer(cTimer);
 	SetupMapConfigs("bossspawner_maps.cfg");
-	if(g_Enabled) {
-		SetupMapConfigs("bossspawner_boss.cfg");
-		ReplyToCommand(client, "[Boss Spawner] Configs have been reloaded!");
-	}
+	SetupMapConfigs("bossspawner_boss.cfg");
+	ReplyToCommand(client, "[Boss Spawner] Configs have been reloaded!");
 }
 
 public Action:SpawnBossCommand(client, args) {
@@ -403,9 +403,20 @@ public SpawnBoss() {
 	}
 }
 
-public CreateBoss(b_index, Float:ipos[3]) {
+public CreateBoss(b_index, Float:kpos[3]) {
 	decl String:ent_class[32];
+	new Float:ipos[3];
+	ipos[0] = kpos[0];
+	ipos[1] = kpos[1];
+	ipos[2] = kpos[2];
 	strcopy(ent_class, sizeof(ent_class), BossAttributes[b_index][2]);
+	if(!StrEqual(BossAttributes[b_index][10], NULL_STRING)) {
+		decl String:sPos[3][16];
+		ExplodeString(BossAttributes[b_index][10], ",", sPos, sizeof(sPos), sizeof(sPos[]));
+		ipos[0] = StringToFloat(sPos[0]);
+		ipos[1] = StringToFloat(sPos[1]);
+		ipos[2] = StringToFloat(sPos[2]);
+	}
 	new ent = CreateEntityByName(ent_class);
 	if(IsValidEntity(ent)) {
 		if(StrEqual(ent_class, "tf_zombie_spawner")) {
@@ -442,6 +453,7 @@ public CreateBoss(b_index, Float:ipos[3]) {
 			bossEnt = ent;
 			bTimer = CreateTimer(StringToFloat(BossAttributes[b_index][9]), RemoveTimer, b_index);
 		}
+		CPrintToChatAll("%t", "Boss_Spawn", BossAttributes[b_index][0]);
 		SetSize(StringToFloat(BossAttributes[b_index][6]), ent);
 		SetGlow(StrEqual(BossAttributes[b_index][7], "Yes") ? 1 : 0, ent);
 	}
@@ -497,9 +509,9 @@ ResizeHitbox(entity, Float:fScale = 1.0) {
 /* --------------------------------BOSS SPAWNING CORE---------------------------------*/
 
 /* ---------------------------------TIMER & HUD CORE----------------------------------*/
-public hudTimer() {
+public HUDTimer() {
 	if(!g_Enabled) return;
-	sInterval = GetConVarInt(cVars[2]);
+	sInterval = GetConVarFloat(cVars[2]);
 	if(hHUD != INVALID_HANDLE) {
 		for(new i = 1; i <= MaxClients; i++) {
 			if(IsClientInGame(i))
@@ -508,7 +520,6 @@ public hudTimer() {
 		CloseHandle(hHUD);
 	}
 	hHUD = CreateHudSynchronizer();
-	SetHudTextParams(0.05, 0.05, 1.0, 255, 255, 255, 255);
 	cTimer = CreateTimer(1.0, HUDCountDown, _, TIMER_REPEAT);
 }
 
@@ -516,7 +527,8 @@ public Action:HUDCountDown(Handle:hTimer) {
 	sInterval--;
 	for(new i = 1; i <= MaxClients; i++) {
 		if(IsClientInGame(i)) {
-			ShowSyncHudText(i, hHUD, "Boss: %d seconds", sInterval);
+			SetHudTextParams(sHUDx, sHUDy, 1.0, 255, 255, 255, 255);
+			ShowSyncHudText(i, hHUD, "Boss: %d seconds", RoundFloat(sInterval));
 		}
 	}
 	if(sInterval <= 0) {
@@ -528,9 +540,9 @@ public Action:HUDCountDown(Handle:hTimer) {
 
 ResetTimer() {
 	if(bossCounter == 0) {
-		CPrintToChatAll("%t", "Time", sInterval);
+		CPrintToChatAll("%t", "Time", RoundFloat(sInterval));
 		ClearTimer(cTimer);
-		hudTimer();
+		HUDTimer();
 	}
 }
 /* ---------------------------------TIMER & HUD CORE----------------------------------*/
@@ -565,8 +577,8 @@ public OnEntityDestroyed(ent) {
 				bossEnt = -1;
 				bossCounter = 0;
 				if(bossCounter == 0) {
-					hudTimer();
-					CPrintToChatAll("%t", "Time", sInterval);
+					HUDTimer();
+					CPrintToChatAll("%t", "Time", RoundFloat(sInterval));
 				}
 			}
 			if(ent == g_trackent) {
@@ -605,7 +617,7 @@ public OnSkeletonSpawn(any:ref) {
 		}
 		AcceptEntityInput(SpawnEnt, "kill");
 		bTimer = CreateTimer(StringToFloat(BossAttributes[temp_index][9]), RemoveTimer);
-		CPrintToChatAll("%t", "Skeleton_Spawn");
+		CPrintToChatAll("%t", "Boss_Spawn", BossAttributes[temp_index][0]);
 		UpdateSkeleton(ent, temp_index);
 		queueBoss = false;
 	}
@@ -740,8 +752,8 @@ public SetupMapConfigs(const String:sFile[]) {
 	if(mapEnabled != 0) {
 		g_Enabled = true;
 		if(GetClientCount(true) >= sMin) {
-			hudTimer();
-			CPrintToChatAll("%t", "Time", sInterval);
+			HUDTimer();
+			CPrintToChatAll("%t", "Time", RoundFloat(sInterval));
 		}
 	}
 	else if(mapEnabled == 0) {
@@ -774,6 +786,7 @@ public SetupBossConfigs(const String:sFile[]) {
 		KvGetString(kv, "Glow", BossAttributes[b_index][7], sizeof(BossAttributes[][]), "Yes");
 		KvGetString(kv, "PosFix", BossAttributes[b_index][8], sizeof(BossAttributes[][]), "0.0");
 		KvGetString(kv, "Lifetime", BossAttributes[b_index][9], sizeof(BossAttributes[][]), "120");
+		KvGetString(kv, "Position", BossAttributes[b_index][10], sizeof(BossAttributes[][]), NULL_STRING);
 		if(StrEqual(BossAttributes[b_index][2], "tf_zombie_spawner") && !StrEqual(BossAttributes[b_index][1], NULL_STRING)) {
 			if(StrEqual(BossAttributes[b_index][2], "tf_zombie_spawner")) {
 				LogError("Skeleton type is not supported.");
