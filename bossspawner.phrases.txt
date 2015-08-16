@@ -3,32 +3,28 @@
 	"Time"
 	{
 		"#format"	"{1:d}"
-		"en"		"{unusual}[Spawner] {default}The next boss will spawn in {unusual}{1} {default}seconds."
+		"en"		"{frozen}[Boss] {orange}The next boss will spawn in {1} seconds."
 	}
 	"Boss_Spawn"
 	{
 		"#format"	"{1:s}"
-		"en"		"{unusual}[Spawner] {default}{1} has spawned!"
+		"en"		"{frozen}[Boss] {orange}{1} has spawned!"
 	}
 	"Boss_Slain"
 	{
-		"en"		"{unusual}[Spawner] {default}All bosses have been slain!"
+		"en"		"{frozen}[Boss] {orange}All bosses has been slain!"
 	}
 	"No_Boss"
 	{
-		"en"		"{unusual}[Spawner] {default}No active boss to slay."
+		"en"		"{frozen}[Boss] {orange}There are not active bosses alive to slay."
 	}
 	"Boss_Left"
 	{
 		"#format"	"{1:s}"
-		"en"		"{unusual}[Spawner] {default}{1} has left due to boredom."
+		"en"		"{frozen}[Boss] {orange}{1} has left the map due to boredom."
 	}
 	"Boss_Active"
 	{
-		"en"		"{unusual}[Spawner] {default}A boss is already active!"
-	}
-	"Error"
-	{
-		"en"		"Error: You must be alive or in game to use this command!"
+		"en"		"{frozen}[Boss] {orange}Can not spawn, a boss is already active."
 	}
 }
