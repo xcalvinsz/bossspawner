@@ -3,12 +3,14 @@
  *	
  *	[TF2] Custom Boss Spawner
  *	Alliedmodders: http://forums.alliedmods.net/member.php?u=87026
- *	Current Version: 4.2
+ *	Current Version: 4.2.1
  *
  *	This plugin is FREE and can be distributed to anyone.  
  *	If you have paid for this plugin, get your money back.
  *	
  *	Version Log:
+ *	v.4.2.1
+ *	- Fixed TeleportLocation not working properly
  *	v.4.2
  *	- Changes: Now uses tries/hashmaps instead of multi-arrays
  *	- Changes: Skeleton king can now use custom model
@@ -32,7 +34,7 @@
 #include <sdkhooks>
 #include <morecolors>
 
-#define PLUGIN_VERSION "4.2"
+#define PLUGIN_VERSION "4.2.1"
 #define INTRO_SND "ui/halloween_boss_summoned_fx.wav"
 #define DEATH_SND "ui/halloween_boss_defeated_fx.wav"
 
@@ -372,41 +374,60 @@ public bool:TraceentFilterPlayer(ent, contentsMask) {
 /* ---------------------------------COMMAND FUNCTION----------------------------------*/
 
 /* --------------------------------BOSS SPAWNING CORE---------------------------------*/
-public SpawnBoss() {
+public SpawnBoss(BaseHP = -1, Size = -1, Glow = -1) {
+	new ScaleHP;
+	if(BaseHP != -1) {
+		ScaleHP = 0;
+	}
 	gActiveTimer = true;
 	if(sMode == 0) {
 		gIndex = GetRandomInt(0, GetArraySize(gArray)-1);
-		CreateBoss(gIndex, gPos, false);
+		CreateBoss(gIndex, gPos, BaseHP, ScaleHP, Size, Glow, false);
 	}
 	else if(sMode == 1) {
 		gIndex++;
-		CreateBoss(gIndex-1, gPos, false);
+		reateBoss(gIndex, gPos, BaseHP, ScaleHP, Size, Glow, false);
 		if(gIndex > GetArraySize(gArray)-1) gIndex = 0;
 	}
 }
 
-public CreateBoss(b_index, Float:kpos[3], bool:cmd) {
+
+
+public CreateBoss(index, Float:kpos[3], iBaseHP, iScaleHP, iSize, iGlow, bool:isCMD) {
 	new Float:temp[3];
 	temp[0] = kpos[0];
 	temp[1] = kpos[1];
 	temp[2] = kpos[2];
-
+	
 	decl String:sName[64], String:sModel[256], String:sType[32], String:sBase[16], String:sScale[16];
 	decl String:sSize[16], String:sGlow[8], String:sPosFix[32], String:sLifetime[32], String:sPosition[32], String:sHorde[8], String:sColor[16];
-	new Handle:iTrie = GetArrayCell(gArray, b_index);
+	new BaseHP, ScaleHP, Size, Glow;
+	new Handle:iTrie = GetArrayCell(gArray, index);
 	GetTrieString(iTrie, "Name", sName, sizeof(sName));
 	GetTrieString(iTrie, "Model", sModel, sizeof(sModel));
 	GetTrieString(iTrie, "Type", sType, sizeof(sType));
-	GetTrieString(iTrie, "Base", sBase, sizeof(sBase));
-	GetTrieString(iTrie, "Scale", sScale, sizeof(sScale));
-	GetTrieString(iTrie, "Size", sSize, sizeof(sSize));
-	GetTrieString(iTrie, "Glow", sGlow, sizeof(sGlow));
+	if(iBaseHP == -1) {
+		GetTrieString(iTrie, "Base", sBase, sizeof(sBase));
+		BaseHP = StringToInt(sBase);
+	}
+	if(iScaleHP == -1) {
+		GetTrieString(iTrie, "Scale", sScale, sizeof(sScale));
+		ScaleHP = StringToInt(sScale);
+	}
+	if(iSize == -1) {
+		GetTrieString(iTrie, "Size", sSize, sizeof(sSize));
+		Size = StringToFloat(sSize);
+	}
+	if(iGlow == -1) {
+		GetTrieString(iTrie, "Glow", sGlow, sizeof(sGlow));
+		Glow = StrEqual(sGlow, "Yes") ? 1 : 0;
+	}
 	GetTrieString(iTrie, "PosFix", sPosFix, sizeof(sPosFix));
 	GetTrieString(iTrie, "Lifetime", sLifetime, sizeof(sLifetime));
 	GetTrieString(iTrie, "Position", sPosition, sizeof(sPosition));
 	GetTrieString(iTrie, "Horde", sHorde, sizeof(sHorde));
 	GetTrieString(iTrie, "Color", sColor, sizeof(sColor));
-	if(!StrEqual(sPosition, NULL_STRING) && !cmd) {
+	if(!StrEqual(sPosition, NULL_STRING) && !isCMD) {
 		decl String:sPos[3][16];
 		ExplodeString(sPosition, ",", sPos, sizeof(sPos), sizeof(sPos[]));
 		temp[0] = StringToFloat(sPos[0]);
@@ -429,8 +450,6 @@ public CreateBoss(b_index, Float:kpos[3], bool:cmd) {
 	else if(StrEqual(sType, "tf_zombie")) {
 		new count = StringToInt(sHorde);
 		new playerCounter = GetClientCount(true);
-		new BaseHP = StringToInt(sBase);
-		new ScaleHP = StringToInt(sScale);
 		new sHealth = (BaseHP + ScaleHP*playerCounter);
 		//SetEntProp(entity, Prop_Send, "m_iTeamNum", team);
 		for(new i = 0; i < count; i++) {
@@ -468,8 +487,8 @@ public CreateBoss(b_index, Float:kpos[3], bool:cmd) {
 					gBCount++;
 					PushArrayCell(gHArray, EntIndexToEntRef(ent));
 				}
-				SetSize(StringToFloat(sSize), ent);
-				SetGlow(StrEqual(sGlow, "Yes") ? 1 : 0, ent);
+				SetSize(Size);
+				SetGlow(Glow);
 				//AcceptEntityInput(ent, "Enable");
 			}
 		}
@@ -480,8 +499,6 @@ public CreateBoss(b_index, Float:kpos[3], bool:cmd) {
 		new ent = CreateEntityByName(sType);
 		if(IsValidEntity(ent)) {
 			new playerCounter = GetClientCount(true);
-			new BaseHP = StringToInt(sBase);
-			new ScaleHP = StringToInt(sScale);
 			new sHealth = (BaseHP + ScaleHP*playerCounter)*10;
 			TeleportEntity(ent, temp, NULL_VECTOR, NULL_VECTOR);
 			DispatchSpawn(ent);
@@ -498,19 +515,19 @@ public CreateBoss(b_index, Float:kpos[3], bool:cmd) {
 			if(gActiveTimer == true) {
 				gBCount++;
 				gBoss = ent;
-				bTimer = CreateTimer(StringToFloat(sLifetime), RemoveTimer, b_index);
+				bTimer = CreateTimer(StringToFloat(sLifetime), RemoveTimer, index);
 			}
 			CPrintToChatAll("%t", "Boss_Spawn", sName);
-			SetSize(StringToFloat(sSize), ent);
-			SetGlow(StrEqual(sGlow, "Yes") ? 1 : 0, ent);
+			SetSize(Size, ent);
+			SetGlow(Glow);
 		}
 	}
 }
 
-public Action:RemoveTimer(Handle:hTimer, any:b_index) {
+public Action:RemoveTimer(Handle:hTimer, any:index) {
 	if(IsValidEntity(gBoss)) {
 		decl String:sName[64];
-		new Handle:iTrie = GetArrayCell(gArray, b_index);
+		new Handle:iTrie = GetArrayCell(gArray, index);
 		GetTrieString(iTrie, "Name", sName, sizeof(sName));
 		CPrintToChatAll("%t", "Boss_Left", sName);
 		AcceptEntityInput(gBoss, "Kill");
@@ -556,6 +573,7 @@ SetSize(Float:value, ent) {
 }
 
 //Taken from r3dw3r3w0lf
+//Doesn't seem to work with skeleton/king
 ResizeHitbox(entity, Float:fScale = 1.0) {
 	decl Float:vecBossMin[3], Float:vecBossMax[3];	
 	GetEntPropVector(entity, Prop_Send, "m_vecMins", vecBossMin);
@@ -851,7 +869,7 @@ public SetupMapConfigs(const String:sFile[]) {
 		Format(sPosition, sizeof(sPosition), "%s", tPosition);
 	}
 	decl Float:tpos[3];
-	if(StrEqual(sPosition, NULL_STRING, false)) {
+	if(!StrEqual(sPosition, NULL_STRING)) {
 		new ent;
 		while((ent = FindEntityByClassname(ent, "info_target")) != -1) {
 			if(IsValidEntity(ent)) {
@@ -860,23 +878,11 @@ public SetupMapConfigs(const String:sFile[]) {
 				if(StrEqual(strName, "spawn_loot")) {
 					AcceptEntityInput(ent, "Kill");
 				}
-			}
-		}
-		while((ent = FindEntityByClassname(ent, "info_target")) != -1) {
-			if(IsValidEntity(ent)) {
-				decl String:strName[32];
-				GetEntPropString(ent, Prop_Data, "m_iName", strName, sizeof(strName));
-				if(StrEqual(strName, "spawn_loot_blue")) {
-					AcceptEntityInput(ent, "Kill");
+				else if(StrEqual(strName, "spawn_loot_blue")) {
+					AcceptEntityInput(ent, "kill");
 				}
-			}
-		}
-		while((ent = FindEntityByClassname(ent, "info_target")) != -1) {
-			if(IsValidEntity(ent)) {
-				decl String:strName[32];
-				GetEntPropString(ent, Prop_Data, "m_iName", strName, sizeof(strName));
-				if(StrEqual(strName, "spawn_loot_red")) {
-					AcceptEntityInput(ent, "Kill");
+				else if(StrEqual(strName, "spawn_loot_red")) {
+					AcceptEntityInput(ent, "kill");
 				}
 			}
 		}
@@ -885,6 +891,7 @@ public SetupMapConfigs(const String:sFile[]) {
 		tpos[0] = StringToFloat(sPos[0]);
 		tpos[1] = StringToFloat(sPos[1]);
 		tpos[2] = StringToFloat(sPos[2]);
+		PrintToServer("%f %f %f", tpos[0], tpos[1], tpos[2]);
 		ent = CreateEntityByName("info_target");
 		if(IsValidEntity(ent)) {
 			SetEntPropString(ent, Prop_Data, "m_iName", "spawn_loot");
