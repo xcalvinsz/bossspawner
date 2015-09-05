@@ -9,8 +9,15 @@
  *	If you have paid for this plugin, get your money back.
  *	
  *	Version Log:
+ *	v.4.2.1_B4
+ * 	- Changed adt_arrays to object-oriented
+ *	- Fixed params size and glow not working for !spawn command
+ *	- Fixed problem where !spawn would calculate wrong health
+ *	- Fixed tf_skeleton_spawner type having issue with glow/size/health being not set properly
+ *	- From B3->B4 fixed treasure island not working, should be ok now
  *	v.4.2.1_B3
  *	- Converting plugin syntax to the new API
+ *	- Maybe fixed issue with timer overlapping with skeleton timer and other bosses
  *	v.4.2.1_B2
  *	- Added args to !spawn <bossname> <health> <size:float> <glow:1,0>
  *	- Added args to !forceboss <bossname>
@@ -29,7 +36,8 @@
 #define DEATH_SND "ui/halloween_boss_defeated_fx.wav"
 
 Handle cVars[6] = {null, ...};
-Handle cTimer = null, bTimer = null, hHUD = null, gArray = null, gHArray = null;
+Handle cTimer = null, bTimer = null, hHUD = null; //gArray = null, gHArray = null;
+ArrayList gArray = null, gHArray = null;
 
 //Variables for ConVars conversion
 int sMode;
@@ -40,7 +48,12 @@ bool gEnabled;
 int gIndex, gBoss = -1;
 float gPos[3], kPos[3];
 bool gActiveTimer, gQueue;
-int gBCount, gTrack = -1, gHPbar = -1, gIndexCmd, gZSent, arg_index, skele_index;
+int gBCount, gTrack = -1, gHPbar = -1, gIndexCmd, gZSent;
+
+//skeleton variable...
+int arg_index, skele_index;
+int skele_BaseHP, skele_ScaleHP, skele_Glow;
+float skele_Size;
 
 public Plugin myinfo =  {
 	name = "[TF2] Custom Boss Spawner",
@@ -81,8 +94,10 @@ public void OnPluginStart() {
 	HookConVarChange(cVars[4], cVarChange);
 	HookConVarChange(cVars[5], cVarChange);
 	
-	gArray = CreateArray();			//Array for storing boss attributes from a trie/hashmap
-	gHArray = CreateArray();		//Array for horde mode
+	//gArray = CreateArray();			//Array for storing boss attributes from a trie/hashmap
+	//gHArray = CreateArray();		//Array for horde mode
+	gArray = new ArrayList();
+	gHArray = new ArrayList();
 	
 	LoadTranslations("common.phrases");
 	LoadTranslations("bossspawner.phrases");
@@ -193,12 +208,13 @@ public Action Boss_Summoned(Handle event, const char[] name, bool dontBroadcast)
 	int temp_index = gIndex;
 	if(gActiveTimer == false) temp_index = gIndexCmd;
 	else {
-		if(sMode == 1) temp_index = gIndex == 0 ? GetArraySize(gArray)-1 : gIndex-1;
+		if(sMode == 1) temp_index = gIndex == 0 ? gArray.Length-1 : gIndex-1;
 		else temp_index = gIndex;
 	}
 	char sISound[256];
 	Handle iTrie = null;
-	iTrie = GetArrayCell(gArray, temp_index);
+	//iTrie = GetArrayCell(gArray, temp_index);
+	iTrie = gArray.Get(temp_index);
 	if(iTrie != null) {
 		GetTrieString(iTrie, "IntroSound", sISound, sizeof(sISound));
 		EmitSoundToAll(sISound);
@@ -211,12 +227,13 @@ public Action Boss_Killed(Handle event, const char[] name, bool dontBroadcast) {
 	int temp_index = gIndex;
 	if(gActiveTimer == false) temp_index = gIndexCmd;
 	else {
-		if(sMode == 1) temp_index = gIndex == 0 ? GetArraySize(gArray)-1 : gIndex-1;
+		if(sMode == 1) temp_index = gIndex == 0 ? gArray.Length-1 : gIndex-1;
 		else temp_index = gIndex;
 	}
 	char sDSound[256];
 	Handle iTrie = null;
-	iTrie = GetArrayCell(gArray, temp_index);
+	//iTrie = GetArrayCell(gArray, temp_index);
+	iTrie = gArray.Get(temp_index);
 	if(iTrie != null) {
 		GetTrieString(iTrie, "DeathSound", sDSound, sizeof(sDSound));
 		EmitSoundToAll(sDSound);
@@ -246,15 +263,16 @@ public Action ForceSpawn(int client, int args) {
 			char sName[64];
 			GetCmdArg(1, arg1, sizeof(arg1));
 			int i;
-			for(i = 0; i < GetArraySize(gArray); i++) {
-				Handle iTrie = GetArrayCell(gArray, i);
+			for(i = 0; i < gArray.Length; i++) {
+				//Handle iTrie = GetArrayCell(gArray, i);
+				Handle iTrie = gArray.Get(i);
 				GetTrieString(iTrie, "Name", sName, sizeof(sName));
 				if(StrEqual(sName, arg1, false)) {
 					gIndex = i;
 					break;
 				}
 			}
-			if(i == GetArraySize(gArray)) {
+			if(i == gArray.Length) {
 				CReplyToCommand(client, "{frozen}[Boss] {red}Error: {orange}Boss does not exist.");
 				return Plugin_Handled;
 			}
@@ -326,8 +344,9 @@ public Action SpawnBossCommand(int client, int args) {
 	int i;
 	Handle iTrie = null;
 	char sName[64];
-	for(i = 0; i < GetArraySize(gArray); i++) {
-		iTrie = GetArrayCell(gArray, i);
+	for(i = 0; i < gArray.Length; i++) {
+		//iTrie = GetArrayCell(gArray, i);
+		iTrie = gArray.Get(i);
 		if(iTrie != null) {
 			GetTrieString(iTrie, "Name", sName, sizeof(sName));
 			if(StrEqual(sName, arg1, false)){
@@ -335,12 +354,12 @@ public Action SpawnBossCommand(int client, int args) {
 			}
 		}
 	}
-	if(i == GetArraySize(gArray)) {
+	if(i == gArray.Length) {
 		CReplyToCommand(client, "{frozen}[Boss] {red}Error: {orange}Boss does not exist.");
 		return Plugin_Handled;
 	}
-	int iBaseHP = -1, iGlow;
-	float iSize = 1.0;
+	int iBaseHP = -1, iGlow = -1;
+	float iSize = -1.0;
 	if(args > 4) {
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Format: sm_spawn <{frozen}boss_name{orange}> <{frozen}health{orange}> <{frozen}size{orange}> <{frozen}glow{orange}>");
 		return Plugin_Handled;
@@ -361,7 +380,7 @@ public Action SpawnBossCommand(int client, int args) {
 	}
 	gIndexCmd = i;
 	gActiveTimer = false;
-	CreateBoss(gIndexCmd, kPos, iBaseHP, -1, iSize, iGlow, true);
+	CreateBoss(gIndexCmd, kPos, iBaseHP, 0, iSize, iGlow, true);
 	return Plugin_Handled;
 }
 
@@ -404,13 +423,13 @@ void SpawnBoss(int iBaseHP = -1, float iSize = -1.0, int iGlow = -1) {
 	}
 	gActiveTimer = true;
 	if(sMode == 0) {
-		gIndex = GetRandomInt(0, GetArraySize(gArray)-1);
+		gIndex = GetRandomInt(0, gArray.Length-1);
 		CreateBoss(gIndex, gPos, iBaseHP, iScaleHP, iSize, iGlow, false);
 	}
 	else if(sMode == 1) {
 		gIndex++;
 		CreateBoss(gIndex-1, gPos, iBaseHP, iScaleHP, iSize, iGlow, false);
-		if(gIndex > GetArraySize(gArray)-1) gIndex = 0;
+		if(gIndex > gArray.Length-1) gIndex = 0;
 	}
 }
 
@@ -422,7 +441,8 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	char sName[64], sModel[256], sType[32], sBase[16], sScale[16], sSize[16], sGlow[8], sPosFix[32];
 	char sLifetime[32], sPosition[32], sHorde[8], sColor[16];
 	//new BaseHP, ScaleHP, Size, Glow;
-	Handle iTrie = GetArrayCell(gArray, index);
+	//Handle iTrie = GetArrayCell(gArray, index);
+	Handle iTrie = gArray.Get(index);
 	GetTrieString(iTrie, "Name", sName, sizeof(sName));
 	GetTrieString(iTrie, "Model", sModel, sizeof(sModel));
 	GetTrieString(iTrie, "Type", sType, sizeof(sType));
@@ -457,6 +477,10 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	if(StrEqual(sType, "tf_zombie_spawner")) {
 		int ent = CreateEntityByName(sType);
 		if(IsValidEntity(ent)) {
+			skele_BaseHP = iBaseHP;
+			skele_ScaleHP = iScaleHP;
+			skele_Size = iSize;
+			skele_Glow = iGlow;
 			SetEntProp(ent, Prop_Data, "m_nSkeletonType", 1);
 			TeleportEntity(ent, temp, NULL_VECTOR, NULL_VECTOR);
 			DispatchSpawn(ent);
@@ -504,7 +528,8 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 				}
 				if(gActiveTimer == true) {
 					gBCount++;
-					PushArrayCell(gHArray, EntIndexToEntRef(ent));
+					gHArray.Push(EntIndexToEntRef(ent));
+					//PushArrayCell(gHArray, EntIndexToEntRef(ent));
 				}
 				SetSize(iSize, ent);
 				SetGlow(iGlow, ent);
@@ -552,7 +577,8 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 public Action RemoveTimer(Handle hTimer, any index) {
 	if(IsValidEntity(gBoss)) {
 		char sName[64];
-		Handle iTrie = GetArrayCell(gArray, index);
+		//Handle iTrie = GetArrayCell(gArray, index);
+		Handle iTrie = gArray.Get(index);
 		GetTrieString(iTrie, "Name", sName, sizeof(sName));
 		CPrintToChatAll("%t", "Boss_Left", sName);
 		AcceptEntityInput(gBoss, "Kill");
@@ -704,8 +730,8 @@ public void OnEntityDestroyed(int ent) {
 			}
 			UpdateBossHealth(gTrack);
 		}
-		for(int i = 0; i < GetArraySize(gHArray); i++) {
-			if(EntRefToEntIndex(GetArrayCell(gHArray, i)) == ent) {
+		for(int i = 0; i < gHArray.Length; i++) {
+			if(EntRefToEntIndex(gHArray.Get(i)) == ent) {
 				gBCount--;
 				if(GetClientCount(true) >= sMin) {
 					if(gBCount == 0) {
@@ -731,23 +757,18 @@ public void OnSkeletonSpawn(any ref) {
 				arg_index = 0;
 			}
 			else {
-				if(sMode == 1) temp_index = gIndex == 0 ? GetArraySize(gArray)-1 : gIndex-1;
+				if(sMode == 1) temp_index = gIndex == 0 ? gArray.Length-1 : gIndex-1;
 				else temp_index = gIndex;
 			}
 		}
 		int playerCounter = GetClientCount(true);
-		char sName[64], sBase[16], sScale[16], sLifetime[32], sModel[256], sSize[16], sGlow[8];
-		Handle iTrie = GetArrayCell(gArray, temp_index);
+		char sName[64], sLifetime[32], sModel[256];
+		//Handle iTrie = GetArrayCell(gArray, temp_index);
+		Handle iTrie = gArray.Get(temp_index);
 		GetTrieString(iTrie, "Name", sName, sizeof(sName));
 		GetTrieString(iTrie, "Model", sModel, sizeof(sModel));
-		GetTrieString(iTrie, "Base", sBase, sizeof(sBase));
-		GetTrieString(iTrie, "Scale", sScale, sizeof(sScale));
 		GetTrieString(iTrie, "Lifetime", sLifetime, sizeof(sLifetime));
-		GetTrieString(iTrie, "Size", sSize, sizeof(sSize));
-		GetTrieString(iTrie, "Glow", sGlow, sizeof(sGlow));
-		int BaseHP = StringToInt(sBase);
-		int ScaleHP = StringToInt(sScale);
-		int sHealth = (BaseHP + ScaleHP*playerCounter)*10;
+		int sHealth = (skele_BaseHP + skele_ScaleHP*playerCounter)*10;
 		SetEntProp(ent, Prop_Data, "m_iHealth", sHealth);
 		SetEntProp(ent, Prop_Data, "m_iMaxHealth", sHealth);
 		if(!StrEqual(sModel, NULL_STRING)) {
@@ -757,13 +778,11 @@ public void OnSkeletonSpawn(any ref) {
 			gBCount++;
 			bTimer = CreateTimer(StringToFloat(sLifetime), RemoveTimer);
 			gBoss = ent;
+			
 		}
-		float iSize = StringToFloat(sSize);
-		int iGlow = iGlow = StrEqual(sGlow, "Yes") ? 1 : 0;
-		SetSize(iSize, ent);
-		SetGlow(iGlow, ent);
 		CPrintToChatAll("%t", "Boss_Spawn", sName);
-		UpdateSkeleton(ent, temp_index);
+		SetSize(skele_Size, ent);
+		SetGlow(skele_Glow, ent);
 		gQueue = false;
 	}
 }
@@ -781,11 +800,12 @@ public void OnPropSpawn(any ref) {
 				int temp_index = gIndex;
 				if(gActiveTimer == false) temp_index = gIndexCmd;
 				else {
-					if(sMode == 1) temp_index = gIndex == 0 ? GetArraySize(gArray)-1 : gIndex-1;
+					if(sMode == 1) temp_index = gIndex == 0 ? gArray.Length-1 : gIndex-1;
 					else temp_index = gIndex;
 				}
 				char sWModel[256];
-				Handle iTrie = GetArrayCell(gArray, temp_index);
+				//Handle iTrie = GetArrayCell(gArray, temp_index);
+				Handle iTrie = gArray.Get(temp_index);
 				GetTrieString(iTrie, "WeaponModel", sWModel, sizeof(sWModel));
 				if(!StrEqual(sWModel, NULL_STRING)){
 					if(StrEqual(sWModel, "Invisible")) {
@@ -800,17 +820,6 @@ public void OnPropSpawn(any ref) {
 		}
 	}
 }
-
-void UpdateSkeleton(int ent, int temp_index) {
-	if(IsValidEntity(ent)) {
-		char sSize[16], sGlow[8];
-		Handle iTrie = GetArrayCell(gArray, temp_index);
-		GetTrieString(iTrie, "Size", sSize, sizeof(sSize));
-		GetTrieString(iTrie, "Glow", sGlow, sizeof(sGlow));
-		SetSize(StringToFloat(sSize), ent);
-		SetGlow(StrEqual(sGlow, "Yes") ? 1 : 0, ent);
-	}
-}  
 
 void FindHealthBar() {
 	gHPbar = FindEntityByClassname(-1, "monster_resource");
@@ -929,22 +938,24 @@ public void SetupMapConfigs(const char[] sFile) {
 		tpos[0] = StringToFloat(sPos[0]);
 		tpos[1] = StringToFloat(sPos[1]);
 		tpos[2] = StringToFloat(sPos[2]);
-		PrintToServer("%f %f %f", tpos[0], tpos[1], tpos[2]);
 		ent = CreateEntityByName("info_target");
 		if(IsValidEntity(ent)) {
-			DispatchKeyValue(ent, "m_iName", "spawn_loot");
+			char spawn_name[] = "spawn_loot";
+			SetEntPropString(ent, Prop_Data, "m_iName", spawn_name);
 			TeleportEntity(ent, tpos, NULL_VECTOR, NULL_VECTOR);
 			DispatchSpawn(ent);
 		}
 		ent = CreateEntityByName("info_target");
 		if(IsValidEntity(ent)) {
-			DispatchKeyValue(ent, "m_iName", "spawn_loot_blue");
+			char spawn_name[] = "spawn_loot_red";
+			SetEntPropString(ent, Prop_Data, "m_iName", spawn_name);
 			TeleportEntity(ent, tpos, NULL_VECTOR, NULL_VECTOR);
 			DispatchSpawn(ent);
 		}
 		ent = CreateEntityByName("info_target");
 		if(IsValidEntity(ent)) {
-			DispatchKeyValue(ent, "m_iName", "spawn_loot_red");
+			char spawn_name[] = "spawn_loot_blue";
+			SetEntPropString(ent, Prop_Data, "m_iName", spawn_name);
 			TeleportEntity(ent, tpos, NULL_VECTOR, NULL_VECTOR);
 			DispatchSpawn(ent);
 		}
@@ -1047,7 +1058,8 @@ public void SetupBossConfigs(const char[] sFile) {
 		SetTrieString(iTrie, "Color", sColor, false);
 		SetTrieString(iTrie, "IntroSound", sISound, false);
 		SetTrieString(iTrie, "DeathSound", sDSound, false);
-		PushArrayCell(gArray, iTrie);
+		//PushArrayCell(gArray, iTrie);
+		gArray.Push(iTrie);
 	} while (KvGotoNextKey(kv));
 	CloseHandle(kv);
 	LogMessage("Loaded Boss configs successfully."); 
