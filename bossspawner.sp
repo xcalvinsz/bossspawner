@@ -533,6 +533,27 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 				}
 				SetSize(iSize, ent);
 				SetGlow(iGlow, ent);
+				int ent2 = CreateEntityByName("prop_dynamic_override");
+				if(IsValidEntity(ent2)) {
+					DispatchKeyValue(ent2, "model", "models/items/tf_gift.mdl");
+					DispatchKeyValue(ent2, "spawnflags", "256");
+					DispatchKeyValue(ent2, "solid", "0");
+					SetEntPropEnt(ent2, Prop_Send, "m_hOwnerEntity", ent);
+					
+					DispatchSpawn(ent2);	
+					AcceptEntityInput(ent2, "TurnOn", ent2, ent2, 0);
+					float positioner[3];
+					//GetClientAbsOrigin(ent, positioner); 
+					GetEntPropVector(ent, Prop_Send, "m_vecOrigin", positioner);
+					positioner[2] -= 10;
+					TeleportEntity(ent2, positioner, NULL_VECTOR, NULL_VECTOR); 
+					
+					SetVariantString("!activator");
+					AcceptEntityInput(ent2, "SetParent", ent, ent2, 0);
+					
+					SetVariantString("head");
+					AcceptEntityInput(ent2, "SetParentAttachmentMaintainOffset", ent2, ent2, 0);
+				}
 				//AcceptEntityInput(ent, "Enable");
 			}
 		}
@@ -567,6 +588,27 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			CPrintToChatAll("%t", "Boss_Spawn", sName);
 			SetSize(iSize, ent);
 			SetGlow(iGlow, ent);
+			int ent2 = CreateEntityByName("prop_dynamic_override");
+			if(IsValidEntity(ent2)) {
+				DispatchKeyValue(ent2, "model", "models/items/tf_gift.mdl");
+				DispatchKeyValue(ent2, "spawnflags", "256");
+				DispatchKeyValue(ent2, "solid", "0");
+				SetEntPropEnt(ent2, Prop_Send, "m_hOwnerEntity", ent);
+				
+				DispatchSpawn(ent2);	
+				AcceptEntityInput(ent2, "TurnOn", ent2, ent2, 0);
+				float positioner[3];
+				//GetClientAbsOrigin(ent, positioner); 
+				GetEntPropVector(ent, Prop_Send, "m_vecOrigin", positioner);
+				positioner[2] -= 10;
+				TeleportEntity(ent2, positioner, NULL_VECTOR, NULL_VECTOR); 
+				
+				SetVariantString("!activator");
+				AcceptEntityInput(ent2, "SetParent", ent, ent2, 0);
+				
+				SetVariantString("head");
+				AcceptEntityInput(ent2, "SetParentAttachmentMaintainOffset", ent2, ent2, 0);
+			}
 		}
 		if(arg_index == 1) {
 			gIndex = skele_index;
@@ -761,6 +803,11 @@ public void OnSkeletonSpawn(any ref) {
 				else temp_index = gIndex;
 			}
 		}
+		//char fname[32];
+		//GetEntPropString(ent, Prop_Data, "m_pParent", fname, sizeof(fname));
+		//PrintToChatAll("name: %s", fname);
+		//int wtf = GetEntProp(ent, Prop_Data, "m_nBody");
+		//PrintToChatAll("val: %d", wtf);
 		int playerCounter = GetClientCount(true);
 		char sName[64], sLifetime[32], sModel[256];
 		//Handle iTrie = GetArrayCell(gArray, temp_index);
