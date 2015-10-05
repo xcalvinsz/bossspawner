@@ -3,7 +3,7 @@
  *	
  *	[TF2] Custom Boss Spawner
  *	Alliedmodders: https://forums.alliedmods.net/showthread.php?t=218119
- *	Current Version: 4.3
+ *	Current Version: 4.3.1
  *
  *	Written by Tak (Chaosxk)
  *	https://forums.alliedmods.net/member.php?u=87026
@@ -12,6 +12,14 @@
  *	If you have paid for this plugin, get your money back.
  *	
 Version Log:
+v.4.3.1 -
+	- Fixed sm_reloadbossconfigs causing console-spawned bosses to spawn more than one depending on how many times you reloaded or map changes
+	- Fixed the built-in downloader for this plugin having directory problems with linux file system
+	- Fixed a small memory leak with the download handles
+	- Fixed a bug where all bosses would be killed off if one of the bosses remove timer was triggered
+	- Fixed a bug where the remove timer would overlap to the next spawned boss
+	- Fixed a bug where DeathSound would not play if more than 1 boss was active
+	- Fixed a bug where "horseman has left due to boredom" is printed on next boss
 v 4.3 -
 Added:
 	- Bosses can now equip hats
@@ -53,7 +61,7 @@ Known Issues:
 #include <sourcemod>
 #include <sdkhooks>
 
-#define PLUGIN_VERSION "4.3"
+#define PLUGIN_VERSION "4.3.1"
 #define INTRO_SND	"ui/halloween_boss_summoned_fx.wav"
 #define DEATH_SND	"ui/halloween_boss_defeated_fx.wav"
 #define HORSEMAN	"headless_hatman"
@@ -63,7 +71,7 @@ Known Issues:
 #define SNULL 		""
 
 Handle cVars[6] = {null, ...};
-Handle cTimer = null, bTimer = null; //jHUD = null; //hHUD = null;
+Handle cTimer = null; //jHUD = null; //hHUD = null;
 ArrayList gArray = null, gHArray = null, gCArray = null;
 
 //Variables for ConVars conversion
@@ -690,18 +698,18 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			temp[i] = StringToFloat(sPos[i]);
 	}
 	temp[2] += StringToFloat(sPosFix);
-	gIsMultiSpawn = StringToInt(sHorde) < 1 ? 1 : StringToInt(sHorde);
+	gIsMultiSpawn = StringToInt(sHorde) <= 1 ? 1 : StringToInt(sHorde);
 	int playerCounter = GetClientCount(true);
 	int sHealth = (iBaseHP + iScaleHP*playerCounter)*(gIsMultiSpawn != 1 ? 1 : 10);
 	for(int i = 0; i < gIsMultiSpawn; i++) {
+		char stringIndex[16];
+		Format(stringIndex, sizeof(stringIndex), "%d : %d", index, gIsMultiSpawn);
 		int ent = CreateEntityByName(sType);
 		TeleportEntity(ent, temp, NULL_VECTOR, NULL_VECTOR);
 		DispatchSpawn(ent);
 		SetEntProp(ent, Prop_Data, "m_iHealth", sHealth);
 		SetEntProp(ent, Prop_Data, "m_iMaxHealth", sHealth); 
 		SetEntProp(ent, Prop_Data, "m_iTeamNum", 0);
-		char stringIndex[8];
-		Format(stringIndex, sizeof(stringIndex), "%d", index);
 		SetEntPropString(ent, Prop_Data, "m_iName", stringIndex);
 		SetEntProp(ent, Prop_Data, "m_iTeamNum", StrEqual(sType, MONOCULUS) ? 5 : 0);
 		if(strlen(sColor) != 0) {
@@ -723,8 +731,12 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			gCCount++;
 		}
 		if(i == 0) {
-			bTimer = CreateTimer(StringToFloat(sLifetime), RemoveTimer, index);
+			DataPack hPack;
+			CreateDataTimer(StringToFloat(sLifetime), RemoveTimerPrint, hPack);
+			hPack.WriteCell(index);
+			hPack.WriteCell(EntIndexToEntRef(ent));
 		}
+		CreateTimer(StringToFloat(sLifetime), RemoveTimer, EntIndexToEntRef(ent));
 		if(strlen(sHModel) != 0) {
 			int hat = CreateEntityByName("prop_dynamic_override");
 			DispatchKeyValue(hat, "model", sHModel);
@@ -767,8 +779,13 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	}
 }
 
-public Action RemoveTimer(Handle hTimer, any index) {
-	for(int i = 0; i < gHArray.Length; i++) {
+public Action RemoveTimer(Handle hTimer, any ref) {
+	int ent = EntRefToEntIndex(ref);
+	if(IsValidEntity(ent)) {
+		AcceptEntityInput(ent, "Kill");
+	}
+	
+	/*for(int i = 0; i < gHArray.Length; i++) {
 		int ent = EntRefToEntIndex(gHArray.Get(i));
 		if(IsValidEntity(ent)) {
 			AcceptEntityInput(ent, "Kill");
@@ -779,7 +796,7 @@ public Action RemoveTimer(Handle hTimer, any index) {
 		if(IsValidEntity(ent)) {
 			AcceptEntityInput(ent, "Kill");
 		}
-	}
+	}*/
 	/*
 	if(jHUD != null) {
 		for(int j = 1; j <= MaxClients; j++) {
@@ -789,12 +806,18 @@ public Action RemoveTimer(Handle hTimer, any index) {
 		jHUD = null;
 		CloseHandle(jHUD);
 	}*/
-	char sName[64];
-	StringMap HashMap = gArray.Get(index);
-	HashMap.GetString("Name", sName, sizeof(sName));
-	CPrintToChatAll("%t", "Boss_Left", sName);
-	bTimer = null;
-	return Plugin_Handled;
+}
+
+public Action RemoveTimerPrint(Handle hTimer, DataPack hPack) {
+	hPack.Reset();
+	int index = hPack.ReadCell();
+	int ent = EntRefToEntIndex(hPack.ReadCell());
+	if(IsValidEntity(ent)) {
+		char sName[64];
+		StringMap HashMap = gArray.Get(index);
+		HashMap.GetString("Name", sName, sizeof(sName));
+		CPrintToChatAll("%t", "Boss_Left", sName);
+	}
 }
 
 //Instead of hooking to sdkhook_takedamage, we use a 0.5 timer because of hud overloading when taking damage
@@ -830,7 +853,6 @@ void RemoveExistingBoss() {
 			AcceptEntityInput(ent, "Kill");
 		}
 	}
-	ClearTimer(bTimer);
 }
 
 void SetGlow(int value, int ent) {
@@ -945,56 +967,100 @@ public void OnEntityDestroyed(int ent) {
 	if(!IsValidEntity(ent)) return;
 	if(ent == gTrack) {
 		//need to fix this later but too lazy atm
-		/*gTrack = FindEntityByClassname(-1, MERASMUS);
-		if (gTrack == ent) {
-			gTrack = FindEntityByClassname(ent, MERASMUS);
-			FindEntityByClassname()
+		gTrack = FindEntityByClassname(-1, HORSEMAN);
+		if(gTrack == ent) {
+			gTrack = FindEntityByClassname(ent, HORSEMAN);
 		}
-		if (gTrack > -1) {
+		if(gTrack == -1) {
+			gTrack = FindEntityByClassname(-1, MONOCULUS);
+			if(gTrack == ent) {
+				gTrack = FindEntityByClassname(ent, HORSEMAN);
+			}
+		}
+		if(gTrack == -1) {
+			gTrack = FindEntityByClassname(-1, MERASMUS);
+			if (gTrack == ent) {
+				gTrack = FindEntityByClassname(ent, MERASMUS);
+			}
+		}
+		if(gTrack == -1) {
+			gTrack = FindEntityByClassname(-1, SKELETON);
+			if (gTrack == ent) {
+				gTrack = FindEntityByClassname(ent, SKELETON);
+			}
+		}
+		if (gTrack != -1) {
 			SDKHook(gTrack, SDKHook_OnTakeDamagePost, OnBossDamaged);
-		}*/
-		gTrack = -1;
-		UpdateBossHealth(gTrack);
+		}
+		RequestFrame(UpdateBossHealth, gTrack);
 	}
 	for(int i = 0; i < gHArray.Length; i++) {
 		if(EntRefToEntIndex(gHArray.Get(i)) == ent) {
-			if(gHCount > 0) {
-				gHCount--;
-			}
-			if(gHCount == 0) {
-				char stringIndex[8];
-				GetEntPropString(ent, Prop_Data, "m_iName", stringIndex, sizeof(stringIndex));
-				int bIndex = StringToInt(stringIndex);
+			char stringIndex[16];
+			GetEntPropString(ent, Prop_Data, "m_iName", stringIndex, sizeof(stringIndex));
+			char sNameSplit[2][8];
+			ExplodeString(stringIndex, " : ", sNameSplit, sizeof(sNameSplit), sizeof(sNameSplit[]));
+			int bIndex = StringToInt(sNameSplit[0]);
+			int bHorde = StringToInt(sNameSplit[1])-1;
+			StringMap HashMap = gArray.Get(bIndex);
+			if(bHorde == 0) {
 				char sDSound[256];
-				StringMap HashMap = gArray.Get(bIndex);
 				HashMap.GetString("DeathSound", sDSound, sizeof(sDSound));
 				if(!StrEqual(sDSound, "none", false)) {
 					EmitSoundToAll(sDSound, _, _, _, _, 1.0);
 				}
-				ClearTimer(bTimer);
 				if(GetClientCount(true) >= sMin) {
 					HUDTimer();
 					CPrintToChatAll("%t", "Time", RoundFloat(sInterval));
+				}
+			}
+			else {
+				char sType[32];
+				HashMap.GetString("Type", sType, sizeof(sType));
+				int ent2;
+				while((ent2 = FindEntityByClassname(ent2, sType)) != -1) {
+					char strName[32];
+					GetEntPropString(ent2, Prop_Data, "m_iName", strName, sizeof(strName));
+					char sNameSplit2[2][8];
+					ExplodeString(strName, " : ", sNameSplit2, sizeof(sNameSplit2), sizeof(sNameSplit2[]));
+					if(StrEqual(sNameSplit[0], sNameSplit2[0])) {
+						Format(stringIndex, sizeof(stringIndex), "%s : %d", sNameSplit2[0], bHorde);
+						SetEntPropString(ent2, Prop_Data, "m_iName", stringIndex);
+					}
 				}
 			}
 		}
 	}
 	for(int i = 0; i < gCArray.Length; i++) {
 		if(EntRefToEntIndex(gCArray.Get(i)) == ent) {
-			if(gCCount > 0) {
-				gCCount--;
-			}
-			if(gCCount == 0) {
-				char stringIndex[8];
-				GetEntPropString(ent, Prop_Data, "m_iName", stringIndex, sizeof(stringIndex));
-				int bIndex = StringToInt(stringIndex);
+			char stringIndex[16];
+			GetEntPropString(ent, Prop_Data, "m_iName", stringIndex, sizeof(stringIndex));
+			char sNameSplit[2][8];
+			ExplodeString(stringIndex, " : ", sNameSplit, sizeof(sNameSplit), sizeof(sNameSplit[]));
+			int bIndex = StringToInt(sNameSplit[0]);
+			int bHorde = StringToInt(sNameSplit[1])-1;
+			StringMap HashMap = gArray.Get(bIndex);
+			if(bHorde == 0) {
 				char sDSound[256];
-				StringMap HashMap = gArray.Get(bIndex);
 				HashMap.GetString("DeathSound", sDSound, sizeof(sDSound));
-				if(!StrEqual(sDSound, "none", false)) { 
+				if(!StrEqual(sDSound, "none", false)) {
 					EmitSoundToAll(sDSound, _, _, _, _, 1.0);
 				}
-				ClearTimer(bTimer);
+			}
+			else {
+				char sType[32];
+				HashMap.GetString("Type", sType, sizeof(sType));
+				int ent2;
+				while((ent2 = FindEntityByClassname(ent2, sType)) != -1) {
+					char strName[32];
+					GetEntPropString(ent2, Prop_Data, "m_iName", strName, sizeof(strName));
+					char sNameSplit2[2][8];
+					ExplodeString(strName, " : ", sNameSplit2, sizeof(sNameSplit2), sizeof(sNameSplit2[]));
+					if(StrEqual(sNameSplit[0], sNameSplit2[0])) {
+						Format(stringIndex, sizeof(stringIndex), "%s : %d", sNameSplit2[0], bHorde);
+						SetEntPropString(ent2, Prop_Data, "m_iName", stringIndex);
+					}
+				}
 			}
 		}
 	}
@@ -1008,9 +1074,11 @@ public void OnPropSpawn(any ref) {
 	char strClassname[64];
 	GetEntityClassname(parent, strClassname, sizeof(strClassname));
 	if(StrEqual(strClassname, HORSEMAN, false)) {
-		char stringIndex[8];
+		char stringIndex[16];
 		GetEntPropString(parent, Prop_Data, "m_iName", stringIndex, sizeof(stringIndex));
-		int bIndex = StringToInt(stringIndex);
+		char sNameSplit[2][8];
+		ExplodeString(stringIndex, " : ", sNameSplit, sizeof(sNameSplit), sizeof(sNameSplit[]));
+		int bIndex = StringToInt(sNameSplit[0]);
 		char sWModel[256];
 		StringMap HashMap = gArray.Get(bIndex);
 		HashMap.GetString("WeaponModel", sWModel, sizeof(sWModel));
@@ -1060,9 +1128,11 @@ public Action OnClientDamaged(int victim, int &attacker, int &inflictor, float &
 	char classname[32];
 	GetEntityClassname(attacker, classname, sizeof(classname));
 	if(StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) || StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON)) {
-		char sDamage[32], stringIndex[8];
+		char sDamage[32], stringIndex[16];
 		GetEntPropString(attacker, Prop_Data, "m_iName", stringIndex, sizeof(stringIndex));
-		int index = StringToInt(stringIndex);
+		char sNameSplit[2][8];
+		ExplodeString(stringIndex, " : ", sNameSplit, sizeof(sNameSplit), sizeof(sNameSplit[]));
+		int index = StringToInt(sNameSplit[0]);
 		for(int i = 0; i < gArray.Length; i++) {
 			if(i == index) {
 				StringMap HashMap = gArray.Get(i);
@@ -1093,9 +1163,11 @@ public void UpdateBossHealth(int ent) {
 			}
 			char classname[32];
 			GetEntityClassname(ent, classname, sizeof(classname));
-			char stringIndex[8];
+			char stringIndex[16];
 			GetEntPropString(ent, Prop_Data, "m_iName", stringIndex, sizeof(stringIndex));
-			int bIndex = StringToInt(stringIndex);
+			char sNameSplit[2][8];
+			ExplodeString(stringIndex, " : ", sNameSplit, sizeof(sNameSplit), sizeof(sNameSplit[]));
+			int bIndex = StringToInt(sNameSplit[0]);
 			char sGnome[8];
 			StringMap HashMap = gArray.Get(bIndex);
 			HashMap.GetString("Gnome", sGnome, sizeof(sGnome));
@@ -1229,6 +1301,7 @@ public void SetupBossConfigs(const char[] sFile) {
 	char sName[64], sModel[256], sType[32], sBase[16], sScale[16], sWModel[256], sSize[16], sGlow[8], sPosFix[32];
 	char sLifetime[32], sPosition[32], sHorde[8], sColor[16], sISound[256], sDSound[256], sHModel[256], sGnome[8];
 	char sHatPosFix[32], sHatSize[16], sDamage[32];
+	static int init = 0;
 	do {
 		KvGetSectionName(kv, sName, sizeof(sName));
 		KvGetString(kv, "Model", sModel, sizeof(sModel), SNULL);
@@ -1322,8 +1395,12 @@ public void SetupBossConfigs(const char[] sFile) {
 		gArray.Push(HashMap);
 		char command[64];
 		Format(command, sizeof(command), "sm_%s", sName);
+		if(init == 1) {
+			RemoveCommandListener(SpawnBossCommand, command);
+		}
 		AddCommandListener(SpawnBossCommand, command);
 	} while (KvGotoNextKey(kv));
+	init = 1;
 	CloseHandle(kv);
 	LogMessage("[Boss] Custom Boss Spawner Configuration has loaded successfully."); 
 }
@@ -1342,7 +1419,10 @@ public void SetupDownloads(const char[] sFile) {
 		int i = -1;
 		i = FindCharInString(buffer, '\n', true);
 		if(i != -1) buffer[i] = '\0';
-		if(!DirExists(buffer, true)) {
+		TrimString(buffer);
+		//Format(buffer, sizeof(buffer), "%s\\", buffer);
+		//PrintToServer("%s", buffer);
+		if(!DirExists(buffer)) {
 			LogError("[Boss] Error: '%s' directory can not be found.", buffer);
 			SetFailState("[Boss] Error: '%s' directory can not be found.", buffer);
 		}
@@ -1370,6 +1450,7 @@ public void SetupDownloads(const char[] sFile) {
 				continue;
 			PrecacheGeneric(fPath, true);
 		}
+		delete sDir;
 	}
 	delete file;
 }
