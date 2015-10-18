@@ -12,6 +12,11 @@
  *	If you have paid for this plugin, get your money back.
  *	
 Version Log:
+v.4.4 -
+	- Saved data information with datapack instead of m_iname in the entity itself
+	- Changed and updated some more functions to be more object oriented
+	- Fixed some healthbar issue with multiple bosses
+	- Fixed a small issue with reloading add/remove commands
 v.4.3.1 -
 	- Fixed sm_reloadbossconfigs causing console-spawned bosses to spawn more than one depending on how many times you reloaded or map changes
 	- Fixed the built-in downloader for this plugin having directory problems with linux file system
@@ -72,7 +77,8 @@ Known Issues:
 
 ConVar cVars[6] = {null, ...};
 Handle cTimer = null; //jHUD = null; //hHUD = null;
-ArrayList gArray = null, gHArray = null, gCArray = null;
+ArrayList gArray = null; //gHArray = null, gCArray = null;
+ArrayList dataArray = null;
 
 //Variables for ConVars conversion
 int sMode;
@@ -129,8 +135,9 @@ public void OnPluginStart() {
 		cVars[i].AddChangeHook(cVarChange);
 	
 	gArray = new ArrayList();
-	gHArray = new ArrayList();
-	gCArray = new ArrayList();
+	//gHArray = new ArrayList();
+	//gCArray = new ArrayList();
+	dataArray = new ArrayList();
 	
 	LoadTranslations("common.phrases");
 	LoadTranslations("bossspawner.phrases");
@@ -620,11 +627,11 @@ bool SetTeleportEndPoint(int client) {
 		kPos[2] = vStart[2] + (vBuffer[2]*Distance);
 	}
 	else {
-		CloseHandle(trace);
+		delete trace;
 		return false;
 	}
 
-	CloseHandle(trace);
+	delete trace;
 	return true;
 }
 
@@ -698,15 +705,21 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	int playerCounter = GetClientCount(true);
 	int sHealth = (iBaseHP + iScaleHP*playerCounter)*(gIsMultiSpawn != 1 ? 1 : 10);
 	for(int i = 0; i < gIsMultiSpawn; i++) {
-		char stringIndex[16];
-		Format(stringIndex, sizeof(stringIndex), "%d : %d", index, gIsMultiSpawn);
+		//char stringIndex[16];
+		//Format(stringIndex, sizeof(stringIndex), "%d", index);
 		int ent = CreateEntityByName(sType);
+		DataPack pack = new DataPack();
+		pack.WriteCell(EntIndexToEntRef(ent));
+		pack.WriteCell(index);
+		pack.WriteCell(view_as<int>(gActiveTimer));
+		pack.WriteCell(gIsMultiSpawn);
+		dataArray.Push(pack);
 		TeleportEntity(ent, temp, NULL_VECTOR, NULL_VECTOR);
 		DispatchSpawn(ent);
 		SetEntProp(ent, Prop_Data, "m_iHealth", sHealth);
 		SetEntProp(ent, Prop_Data, "m_iMaxHealth", sHealth); 
 		SetEntProp(ent, Prop_Data, "m_iTeamNum", 0);
-		SetEntPropString(ent, Prop_Data, "m_iName", stringIndex);
+		//SetEntPropString(ent, Prop_Data, "m_iName", stringIndex);
 		SetEntProp(ent, Prop_Data, "m_iTeamNum", StrEqual(sType, MONOCULUS) ? 5 : 0);
 		if(strlen(sColor) != 0) {
 			if(StrEqual(sColor, "Red", false)) SetEntProp(ent, Prop_Send, "m_nSkin", 0);
@@ -718,16 +731,17 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		if(strlen(sModel) != 0) {
 			SetEntityModel(ent, sModel);
 		}
-		if(gActiveTimer == true) {
-			gHArray.Push(EntIndexToEntRef(ent));
+		gActiveTimer ? gHCount++ : gCCount++;
+		/*if(gActiveTimer == true) {
+			//gHArray.Push(EntIndexToEntRef(ent));
 			gHCount++;
 		}
 		else {
-			gCArray.Push(EntIndexToEntRef(ent));
+			//gCArray.Push(EntIndexToEntRef(ent));
 			gCCount++;
-		}
+		}*/
 		if(i == 0) {
-			DataPack hPack;
+			DataPack hPack = new DataPack();
 			CreateDataTimer(StringToFloat(sLifetime), RemoveTimerPrint, hPack);
 			hPack.WriteCell(index);
 			hPack.WriteCell(EntIndexToEntRef(ent));
@@ -751,7 +765,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			if(!StrEqual(sType, MONOCULUS)) {
 				SetVariantString("head");
 				AcceptEntityInput(hat, "SetParentAttachment", ent, ent, 0);
-				SetVariantString("head");
+				//SetVariantString("head");
 				AcceptEntityInput(hat, "SetParentAttachmentMaintainOffset", ent, ent, 0);
 			}
 			float hatpos[3];
@@ -837,7 +851,7 @@ public Action HealthTimer(Handle hTimer, any ref) {
 }
 
 void RemoveExistingBoss() {
-	for(int i = 0; i < gHArray.Length; i++) {
+	/*for(int i = 0; i < gHArray.Length; i++) {
 		int ent = EntRefToEntIndex(gHArray.Get(i));
 		if(IsValidEntity(ent)) {
 			AcceptEntityInput(ent, "Kill");
@@ -848,8 +862,41 @@ void RemoveExistingBoss() {
 		if(IsValidEntity(ent)) {
 			AcceptEntityInput(ent, "Kill");
 		}
-	}
+	}*/
+	for(int i = 0; i < dataArray.Length; i++)
+	{
+		DataPack pack = dataArray.Get(i);
+		int ent = EntRefToEntIndex(pack.ReadCell());
+		if(!IsValidEntity(ent)) continue;
+		AcceptEntityInput(ent, "Kill");
+		
+	}	
 }
+
+/*
+void RemoveExistingBoss() {
+	int ent = -1;
+	while((ent = FindEntityByClassname(ent, "headless_hatman")) != -1) {
+		if(IsValidEntity(ent)) {
+			AcceptEntityInput(ent, "Kill");
+		}
+	}
+	while((ent = FindEntityByClassname(ent, "eyeball_boss")) != -1) {
+		if(IsValidEntity(ent)) {
+			AcceptEntityInput(ent, "Kill");
+		}
+	}
+	while((ent = FindEntityByClassname(ent, "merasmus")) != -1) {
+		if(IsValidEntity(ent)) {
+			AcceptEntityInput(ent, "Kill");
+		}
+	}
+	while((ent = FindEntityByClassname(ent, "tf_zombie")) != -1) {
+		if(IsValidEntity(ent)) {
+			AcceptEntityInput(ent, "Kill");
+		}
+	}
+}*/
 
 void SetGlow(int value, int ent) {
 	if(IsValidEntity(ent)) {
@@ -990,75 +1037,44 @@ public void OnEntityDestroyed(int ent) {
 		}
 		RequestFrame(UpdateBossHealth, gTrack);
 	}
-	for(int i = 0; i < gHArray.Length; i++) {
-		if(EntRefToEntIndex(gHArray.Get(i)) == ent) {
-			char stringIndex[16];
-			GetEntPropString(ent, Prop_Data, "m_iName", stringIndex, sizeof(stringIndex));
-			char sNameSplit[2][8];
-			ExplodeString(stringIndex, " : ", sNameSplit, sizeof(sNameSplit), sizeof(sNameSplit[]));
-			int bIndex = StringToInt(sNameSplit[0]);
-			int bHorde = StringToInt(sNameSplit[1])-1;
-			StringMap HashMap = gArray.Get(bIndex);
-			if(bHorde == 0) {
+	for(int i = 0; i < dataArray.Length; i++)
+	{
+		DataPack pack = dataArray.Get(i);
+		pack.Reset();
+		int boss = EntRefToEntIndex(pack.ReadCell());
+		if(boss == ent)
+		{
+			int index = pack.ReadCell();
+			bool timer = view_as<bool>(pack.ReadCell());
+			int max = pack.ReadCell()-1;
+			StringMap HashMap = gArray.Get(index);
+			if(max == 0)
+			{
 				char sDSound[256];
 				HashMap.GetString("DeathSound", sDSound, sizeof(sDSound));
-				if(!StrEqual(sDSound, "none", false)) {
+				if(!StrEqual(sDSound, "none", false)) 
+				{
 					EmitSoundToAll(sDSound, _, _, _, _, 1.0);
 				}
-				if(GetClientCount(true) >= sMin) {
+				if(GetClientCount(true) >= sMin) 
+				{
 					HUDTimer();
 					CPrintToChatAll("%t", "Time", RoundFloat(sInterval));
 				}
-			}
-			else {
-				char sType[32];
-				HashMap.GetString("Type", sType, sizeof(sType));
-				int ent2;
-				while((ent2 = FindEntityByClassname(ent2, sType)) != -1) {
-					char strName[32];
-					GetEntPropString(ent2, Prop_Data, "m_iName", strName, sizeof(strName));
-					char sNameSplit2[2][8];
-					ExplodeString(strName, " : ", sNameSplit2, sizeof(sNameSplit2), sizeof(sNameSplit2[]));
-					if(StrEqual(sNameSplit[0], sNameSplit2[0])) {
-						Format(stringIndex, sizeof(stringIndex), "%s : %d", sNameSplit2[0], bHorde);
-						SetEntPropString(ent2, Prop_Data, "m_iName", stringIndex);
-					}
+				if(timer && GetClientCount(true) >= sMin) {
+					HUDTimer();
+					CPrintToChatAll("%t", "Time", RoundFloat(sInterval));
 				}
+				delete pack;
+			}
+			else
+			{
+				int pack_position = pack.Position;
+				SetPackPosition(pack, pack_position-1);
+				pack.WriteCell(max);
 			}
 		}
-	}
-	for(int i = 0; i < gCArray.Length; i++) {
-		if(EntRefToEntIndex(gCArray.Get(i)) == ent) {
-			char stringIndex[16];
-			GetEntPropString(ent, Prop_Data, "m_iName", stringIndex, sizeof(stringIndex));
-			char sNameSplit[2][8];
-			ExplodeString(stringIndex, " : ", sNameSplit, sizeof(sNameSplit), sizeof(sNameSplit[]));
-			int bIndex = StringToInt(sNameSplit[0]);
-			int bHorde = StringToInt(sNameSplit[1])-1;
-			StringMap HashMap = gArray.Get(bIndex);
-			if(bHorde == 0) {
-				char sDSound[256];
-				HashMap.GetString("DeathSound", sDSound, sizeof(sDSound));
-				if(!StrEqual(sDSound, "none", false)) {
-					EmitSoundToAll(sDSound, _, _, _, _, 1.0);
-				}
-			}
-			else {
-				char sType[32];
-				HashMap.GetString("Type", sType, sizeof(sType));
-				int ent2;
-				while((ent2 = FindEntityByClassname(ent2, sType)) != -1) {
-					char strName[32];
-					GetEntPropString(ent2, Prop_Data, "m_iName", strName, sizeof(strName));
-					char sNameSplit2[2][8];
-					ExplodeString(strName, " : ", sNameSplit2, sizeof(sNameSplit2), sizeof(sNameSplit2[]));
-					if(StrEqual(sNameSplit[0], sNameSplit2[0])) {
-						Format(stringIndex, sizeof(stringIndex), "%s : %d", sNameSplit2[0], bHorde);
-						SetEntPropString(ent2, Prop_Data, "m_iName", stringIndex);
-					}
-				}
-			}
-		}
+		
 	}
 }
 
@@ -1070,11 +1086,16 @@ public void OnPropSpawn(any ref) {
 	char strClassname[64];
 	GetEntityClassname(parent, strClassname, sizeof(strClassname));
 	if(StrEqual(strClassname, HORSEMAN, false)) {
-		char stringIndex[16];
-		GetEntPropString(parent, Prop_Data, "m_iName", stringIndex, sizeof(stringIndex));
-		char sNameSplit[2][8];
-		ExplodeString(stringIndex, " : ", sNameSplit, sizeof(sNameSplit), sizeof(sNameSplit[]));
-		int bIndex = StringToInt(sNameSplit[0]);
+		int bIndex = -1;
+		for(int i = 0; i < dataArray.Length; i++) {
+			DataPack pack = dataArray.Get(i);
+			pack.Reset();
+			int boss = EntRefToEntIndex(pack.ReadCell());
+			if(boss == parent) {
+				bIndex = pack.ReadCell();
+				break;
+			}
+		}
 		char sWModel[256];
 		StringMap HashMap = gArray.Get(bIndex);
 		HashMap.GetString("WeaponModel", sWModel, sizeof(sWModel));
@@ -1124,13 +1145,19 @@ public Action OnClientDamaged(int victim, int &attacker, int &inflictor, float &
 	char classname[32];
 	GetEntityClassname(attacker, classname, sizeof(classname));
 	if(StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) || StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON)) {
-		char sDamage[32], stringIndex[16];
-		GetEntPropString(attacker, Prop_Data, "m_iName", stringIndex, sizeof(stringIndex));
-		char sNameSplit[2][8];
-		ExplodeString(stringIndex, " : ", sNameSplit, sizeof(sNameSplit), sizeof(sNameSplit[]));
-		int index = StringToInt(sNameSplit[0]);
+		char sDamage[32];
+		int bIndex = -1;
+		for(int i = 0; i < dataArray.Length; i++) {
+			DataPack pack = dataArray.Get(i);
+			pack.Reset();
+			int boss = EntRefToEntIndex(pack.ReadCell());
+			if(boss == attacker) {
+				bIndex = pack.ReadCell();
+				break;
+			}
+		}
 		for(int i = 0; i < gArray.Length; i++) {
-			if(i == index) {
+			if(i == bIndex) {
 				StringMap HashMap = gArray.Get(i);
 				HashMap.GetString("Damage", sDamage, sizeof(sDamage));
 				break;
@@ -1159,11 +1186,16 @@ public void UpdateBossHealth(int ent) {
 			}
 			char classname[32];
 			GetEntityClassname(ent, classname, sizeof(classname));
-			char stringIndex[16];
-			GetEntPropString(ent, Prop_Data, "m_iName", stringIndex, sizeof(stringIndex));
-			char sNameSplit[2][8];
-			ExplodeString(stringIndex, " : ", sNameSplit, sizeof(sNameSplit), sizeof(sNameSplit[]));
-			int bIndex = StringToInt(sNameSplit[0]);
+			int bIndex = -1;
+			for(int i = 0; i < dataArray.Length; i++) {
+				DataPack pack = dataArray.Get(i);
+				pack.Reset();
+				int boss = EntRefToEntIndex(pack.ReadCell());
+				if(boss == ent) {
+					bIndex = pack.ReadCell();
+					break;
+				}
+			}
 			char sGnome[8];
 			StringMap HashMap = gArray.Get(bIndex);
 			HashMap.GetString("Gnome", sGnome, sizeof(sGnome));
