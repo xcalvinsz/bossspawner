@@ -75,7 +75,7 @@ Known Issues:
 #define SKELETON	"tf_zombie"
 #define SNULL 		""
 
-ConVar cVars[6] = {null, ...};
+Handle cVars[6] = {null, ...};
 Handle cTimer = null; //jHUD = null; //hHUD = null;
 ArrayList gArray = null; //gHArray = null, gCArray = null;
 ArrayList dataArray = null;
@@ -130,9 +130,13 @@ public void OnPluginStart() {
 	HookEvent("eyeball_boss_killed", Boss_Killed, EventHookMode_Pre);
 	HookEvent("merasmus_escape_warning", Merasmus_Leave, EventHookMode_Pre);
 	HookEvent("eyeball_boss_escape_imminent", Monoculus_Leave, EventHookMode_Pre);
-
-	for(int i = 0; i < 6; i++)
-		cVars[i].AddChangeHook(cVarChange);
+	
+	HookConVarChange(cVars[0], cVarChange);
+	HookConVarChange(cVars[1], cVarChange);
+	HookConVarChange(cVars[2], cVarChange);
+	HookConVarChange(cVars[3], cVarChange);
+	HookConVarChange(cVars[4], cVarChange);
+	HookConVarChange(cVars[5], cVarChange);
 	
 	gArray = new ArrayList();
 	//gHArray = new ArrayList();
@@ -1231,7 +1235,7 @@ public void SetupMapConfigs(const char[] sFile) {
 		LogError("[Boss] Error: Can not find map filepath %s", sPath);
 		SetFailState("[Boss] Error: Can not find map filepath %s", sPath);
 	}
-	KeyValues kv = CreateKeyValues("Boss Spawner Map");
+	Handle kv = CreateKeyValues("Boss Spawner Map");
 	FileToKeyValues(kv, sPath);
 
 	if(!KvGotoFirstSubKey(kv)) {
@@ -1246,24 +1250,25 @@ public void SetupMapConfigs(const char[] sFile) {
 	char requestMap[64], currentMap[64], sPosition[64], tPosition[64];
 	GetCurrentMap(currentMap, sizeof(currentMap));
 	do {
-		kv.GetSectionName(requestMap, sizeof(requestMap));
+		KvGetSectionName(kv, requestMap, sizeof(requestMap));
 		if(StrEqual(requestMap, currentMap, false)) {
-			mapEnabled = kv.GetNum("Enabled", 0);
-			gPos[0] = kv.GetFloat("Position X", 0.0);
-			gPos[1] = kv.GetFloat("Position Y", 0.0);
-			gPos[2] = kv.GetFloat("Position Z", 0.0);
-			kv.GetString("TeleportPosition", sPosition, sizeof(sPosition), SNULL);
+			mapEnabled = KvGetNum(kv, "Enabled", 0);
+			gPos[0] = KvGetFloat(kv, "Position X", 0.0);
+			gPos[1] = KvGetFloat(kv, "Position Y", 0.0);
+			gPos[2] = KvGetFloat(kv, "Position Z", 0.0);
+			KvGetString(kv, "TeleportPosition", sPosition, sizeof(sPosition), SNULL);
 			Default = true;
 		}
 		else if(StrEqual(requestMap, "Default", false)) {
-			tempEnabled = kv.GetNum("Enabled", 0);
-			temp_pos[0] = kv.GetFloat("Position X", 0.0);
-			temp_pos[1] = kv.GetFloat("Position Y", 0.0);
-			temp_pos[2] = kv.GetFloat("Position Z", 0.0);
-			kv.GetString("TeleportPosition", tPosition, sizeof(tPosition), SNULL);
+			tempEnabled = KvGetNum(kv, "Enabled", 0);
+			temp_pos[0] = KvGetFloat(kv, "Position X", 0.0);
+			temp_pos[1] = KvGetFloat(kv, "Position Y", 0.0);
+			temp_pos[2] = KvGetFloat(kv, "Position Z", 0.0);
+			KvGetString(kv, "TeleportPosition", tPosition, sizeof(tPosition), SNULL);
+			
 		}
-	} while kv.GotoNextKey();
-	delete kv;
+	} while (KvGotoNextKey(kv));
+	CloseHandle(kv);
 	if(Default == false) {
 		mapEnabled = tempEnabled;
 		gPos = temp_pos;
