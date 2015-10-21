@@ -867,9 +867,9 @@ void RemoveExistingBoss() {
 			AcceptEntityInput(ent, "Kill");
 		}
 	}*/
-	for(int i = 0; i < dataArray.Length; i++) {
+	for(int i = 0; i < dataArray.Length; i++)
+	{
 		DataPack pack = dataArray.Get(i);
-		pack.Reset();
 		int ent = EntRefToEntIndex(pack.ReadCell());
 		if(!IsValidEntity(ent)) continue;
 		AcceptEntityInput(ent, "Kill");
