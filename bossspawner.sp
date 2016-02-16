@@ -3,7 +3,7 @@
  *	
  *	[TF2] Custom Boss Spawner
  *	Alliedmodders: https://forums.alliedmods.net/showthread.php?t=218119
- *	Current Version: 4.4
+ *	Current Version: 4.4.1
  *
  *	Written by Tak (Chaosxk)
  *	https://forums.alliedmods.net/member.php?u=87026
@@ -12,6 +12,13 @@
  *	If you have paid for this plugin, get your money back.
  *	
 Version Log:
+v.4.4.1 -
+	Fixed a bug where bosses that die normally then trying to use the command !fb would say boss is already spawned
+	Fixed a bug where manual spawned bosses would get killed on on player disconnecting
+	Bosses will no longer get force removed by plugin when players disconnect below the treshold: sm_boss_minplayers (only timers will stop)
+	Fixed sm_boss_minplayer if statements not working properly due to improper int/float comparison
+	Changed OnClientDisconnect to OnClientDisconenct_Post to fix client count which was off by 1
+	SDKUnhook on client disconnect post
 v.4.4  -
 Added -
 	Added Cvar:sm_healthbar_type to change healthbar display type: 0-off 1-hudbar 2-hudtext 3-both
@@ -53,7 +60,7 @@ Known Issues:
 #include <sourcemod>
 #include <sdkhooks>
 
-#define PLUGIN_VERSION "4.4"
+#define PLUGIN_VERSION "4.4.1"
 #define INTRO_SND	"ui/halloween_boss_summoned_fx.wav"
 #define DEATH_SND	"ui/halloween_boss_defeated_fx.wav"
 #define HORSEMAN	"headless_hatman"
@@ -68,8 +75,8 @@ ArrayList gArray = null;
 ArrayList gData = null;
 
 //Variables for ConVars conversion
-int sMode, sHealthBar;
-float sInterval, sMin, sHUDx, sHUDy;
+int sMode, sHealthBar, sMin;
+float sInterval, sHUDx, sHUDy;
 bool gEnabled;
 
 //Other variables
@@ -142,7 +149,7 @@ public void OnPluginEnd() {
 public void OnConfigsExecuted() {
 	sMode 		= 	GetConVarInt(cVars[1]);
 	sInterval 	= 	GetConVarFloat(cVars[2]);
-	sMin		= 	GetConVarFloat(cVars[3]);
+	sMin		= 	GetConVarInt(cVars[3]);
 	sHUDx 		= 	GetConVarFloat(cVars[4]);
 	sHUDy 		= 	GetConVarFloat(cVars[5]);
 	sHealthBar 	= 	GetConVarInt(cVars[6]);
@@ -181,11 +188,12 @@ public void OnClientPostAdminCheck(int client) {
 	SDKHook(client, SDKHook_OnTakeDamage, OnClientDamaged);
 }
 
-public void OnClientDisconnect(int client) {
+public void OnClientDisconnect_Post(int client) {
 	if(GetClientCount(true) < sMin) {
 		ClearTimer(cTimer);
-		RemoveExistingBoss();
+		//RemoveExistingBoss();
 	}
+	SDKUnhook(client, SDKHook_OnTakeDamage, OnClientDamaged);
 }
 
 public void cVarChange(Handle convar, char[] oldValue, char[] newValue) {
@@ -202,7 +210,7 @@ public void cVarChange(Handle convar, char[] oldValue, char[] newValue) {
 	}
 	else if((convar == cVars[2]) || (convar == cVars[3])) {
 		if(convar == cVars[2]) sInterval = iNewValue;
-		else sMin = iNewValue;
+		else sMin = RoundFloat(iNewValue);
 		
 		if(GetClientCount(true) >= sMin) {
 			if(g_AutoBoss == 0) {
@@ -211,7 +219,7 @@ public void cVarChange(Handle convar, char[] oldValue, char[] newValue) {
 		}
 		else {
 			ClearTimer(cTimer);
-			RemoveExistingBoss();
+			//RemoveExistingBoss();
 		}
 	}
 	else if(convar == cVars[4]) {
@@ -349,7 +357,6 @@ public Action SlayBoss(int client, int args) {
 	}
 	ClearTimer(cTimer);
 	RemoveExistingBoss();
-	g_AutoBoss = 0; //All bosses slain, set boss counter back to 0
 	CReplyToCommand(client, "%t", "Boss_Slain");
 	return Plugin_Handled;
 }
@@ -901,7 +908,6 @@ public void HUDTimer() {
 }
 
 public Action HUDCountDown(Handle hTimer) {
-	sInterval--;
 	for(int i = 1; i <= MaxClients; i++) {
 		if(IsClientInGame(i)) {
 			SetHudTextParams(sHUDx, sHUDy, 1.0, 255, 255, 255, 255);
@@ -913,6 +919,7 @@ public Action HUDCountDown(Handle hTimer) {
 		cTimer = null;
 		return Plugin_Stop;
 	}
+	sInterval--;
 	return Plugin_Continue;
 }
 
@@ -1013,6 +1020,9 @@ public void OnEntityDestroyed(int ent) {
 					CPrintToChatAll("%t", "Time", RoundFloat(sInterval));
 				}
 				delete dMax;
+			}
+			if(timed) {
+				g_AutoBoss--;
 			}
 			delete dReference;
 			break;
