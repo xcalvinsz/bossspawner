@@ -3,7 +3,7 @@
  *	
  *	[TF2] Custom Boss Spawner
  *	Alliedmodders: https://forums.alliedmods.net/showthread.php?t=218119
- *	Current Version: 4.4 BETA
+ *	Current Version: 4.4
  *
  *	Written by Tak (Chaosxk)
  *	https://forums.alliedmods.net/member.php?u=87026
@@ -12,52 +12,27 @@
  *	If you have paid for this plugin, get your money back.
  *	
 Version Log:
-v.4.4 BETA -
-	- Updated and changed the way data is stored, now stores in references of arraylists instead of saving data in the entity itself
+v.4.4  -
+	- Updated and changed the way entity data is stored, now stores in references of arraylists instead of saving data in the entity itself
 	- Changed and updated some more functions to be more object oriented
-	- Fixed some healthbar issue with multiple bosses
-	- Fixed a small issue with reloading add/remove commands
+	- sm_reloadbossconfig due to some issues with add/remove commands, just reload plugins which is better to do
 	- Fixed bug when slaying a boss and spawning another would say that the boss is still active
 	- Fixed bug where all info_target entities were getting killed off, causing issues like broken teleporters in maps
 	- Fixed bug where console would say spawn_boss_alt not found, was a typo from spawn_loot_alt
-	- Removed GNOME key from skeleton due to problems and issues that i can't resolve
-	
-v.4.3.1 -
-	- Fixed sm_reloadbossconfigs causing console-spawned bosses to spawn more than one depending on how many times you reloaded or map changes
-	- Fixed the built-in downloader for this plugin having directory problems with linux file system
-	- Fixed a small memory leak with the download handles
-	- Fixed a bug where all bosses would be killed off if one of the bosses remove timer was triggered
-	- Fixed a bug where the remove timer would overlap to the next spawned boss
-	- Fixed a bug where DeathSound would not play if more than 1 boss was active
-	- Fixed a bug where "horseman has left due to boredom" is printed on next boss
-v 4.3 -
-Added:
-	- Bosses can now equip hats
-	- Added new key: Gnome [0-Off : 1-On] [Restriction: tf_zombie] Spawns mini-gnome skeletons when skeleton/skeleton king dies
-	- Added new HUD display over the healthbar to display exact value of boss health
-	- sm_spawn command is replaced by !spawnboss and !sb, both opens a menu to spawn boss where the player looks at
-	- Added override (sm_boss_override) to override boss spawn flag (!horseman, !monoculus, ... etc)
-	- Added command !fb which does the same as !forceboss
-	- Added value: "none" to key "IntroSound" and "DeathSound" which will not play any sound 
-	- Added keys: "HatPosFix" and "HatSize" and "Damage" to bossspawner_boss.cfg
-	- Added built-in downloader/precacher (bossspawner_downloads.cfg)
-Changed:
-	- Plugin has been changed to use the new API/Syntax
-	- Bosses can now be spawned using !<bossname> <health> <size> <glow>
-	- Skeleton King hitbox can now resize to scale
-	- Changed the way the plugin keeps track of bosses index to be more readable/efficient
-	- Bosses spawned by command will now run under a remove time (key: lifetime)
-	- Plugin will now error out if there is a space in bosses name, replace spaces with _.
-	- When boss spawn message is printed, it will replace _ in the name with a space. (E.G Name:The_Horseman -> The Horseman has spawned)
-Removed:
-	- sm_spawn command has been removed
-	- tf_skeleton_spawner type has been removed, replaced with tf_zombie
-Fixed:
-	- Fixed issue with sm_reloadconfigs not reloading the configs properly
-	- Fixed issue where boss death sound may play the wrong sound
-	- Fixed issue where message will say boss has left although the boss already died
-	- Fixed issue where tf_zombie would die from colliding with payload cart
-	- Fixed issue with spawning 2 bosses and the healthbar not working for 2nd boss
+	- Fixed DeathSound key not playing properly again on multiple boss spawns, uses datapack as references
+	- Healthbar should now work on multiple bosses properly
+	- Added cvar:sm_healthbar_type to change healthbar type, 0-off 1-hudbar 2-hudtext 3-both
+	- Improved healthbar carry over to another boss if the current one dies
+	- Healthbar no longer shows negative value when getting shot below 0 hp
+	- Fixed Health/Scale/Size/Glow not working properly even when being defined in .cfg file
+	- !sb and !spawnboss can now be used while spectating (Note: Boss will spawn directly on player that you are spectating)
+	- !slayboss command will only reply "bosses have been slain" back to user and not to all players
+	- Fixed a bug with playing disconnecting and causing the auto-spawned bosses from breaking
+	- Fixed bug with hitbox not scaling properly
+	- Fixed a memory leak on data timers
+	- Blocks the message "player has killed horseman/merasmus/monoculus" when boss dies
+	- Fixed some small typos on some functions
+	- Code cleanup of useless comments
 Known Issues:
 	- When tf_skeleton with a hat attacks you while standing still, his hat model may freeze until he starts moving
 	- eyeball_boss can die from collision from a payload cart, most of time in air so it doesn't matter too much
@@ -71,7 +46,7 @@ Known Issues:
 #include <sourcemod>
 #include <sdkhooks>
 
-#define PLUGIN_VERSION "4.4 BETA"
+#define PLUGIN_VERSION "4.4"
 #define INTRO_SND	"ui/halloween_boss_summoned_fx.wav"
 #define DEATH_SND	"ui/halloween_boss_defeated_fx.wav"
 #define HORSEMAN	"headless_hatman"
@@ -80,23 +55,21 @@ Known Issues:
 #define SKELETON	"tf_zombie"
 #define SNULL 		""
 
-ConVar cVars[6] = {null, ...};
-Handle cTimer = null; //jHUD = null; //hHUD = null;
-ArrayList gArray = null; //gHArray = null, gCArray = null;
-//ArrayList dataArray = null;
-//DataPack gData = null;
+ConVar cVars[7] = {null, ...};
+Handle cTimer = null;
+ArrayList gArray = null;
 ArrayList gData = null;
 
 //Variables for ConVars conversion
-int sMode;
+int sMode, sHealthBar;
 float sInterval, sMin, sHUDx, sHUDy;
 bool gEnabled;
 
 //Other variables
-int gIndex, gIndexCmd, gIsMultiSpawn;
+int gIndex, gIndexCmd;
 float gPos[3], kPos[3];
 bool gActiveTimer;
-int gHCount, gTrack = -1, gHPbar = -1;
+int g_AutoBoss, gTrack = -1, gHPbar = -1;
 
 //Index saving
 int argIndex, saveIndex;
@@ -104,48 +77,45 @@ int argIndex, saveIndex;
 public Plugin myinfo =  {
 	name = "[TF2] Custom Boss Spawner",
 	author = "Tak (chaosxk)",
-	description = "An advanced boss spawner.",
+	description = "An advanced custom boss spawner.",
 	version = PLUGIN_VERSION,
 	url = "http://www.sourcemod.net"
 }
 
 public void OnPluginStart() {
-	cVars[0] = CreateConVar("sm_boss_version", PLUGIN_VERSION, "Custom Boss Spawner Version", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
-	cVars[1] = CreateConVar("sm_boss_mode", "1", "Spawn mode for auto-spawning [0:Random | 1:Ordered]");
-	cVars[2] = CreateConVar("sm_boss_interval", "300", "How many seconds until the next boss spawns?");
-	cVars[3] = CreateConVar("sm_boss_minplayers", "12", "How many players are needed before enabling auto-spawning?");
-	cVars[4] = CreateConVar("sm_boss_hud_x", "0.05", "X-Coordinate of the HUD display.");
-	cVars[5] = CreateConVar("sm_boss_hud_y", "0.05", "Y-Coordinate of the HUD display");
+	cVars[0] = CreateConVar("sm_boss_version", 		PLUGIN_VERSION, "Custom Boss Spawner Version", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
+	cVars[1] = CreateConVar("sm_boss_mode", 		"1", 			"Spawn mode for auto-spawning [0:Random | 1:Ordered]");
+	cVars[2] = CreateConVar("sm_boss_interval", 	"300", 			"How many seconds until the next boss spawns?");
+	cVars[3] = CreateConVar("sm_boss_minplayers", 	"12", 			"How many players are needed before enabling auto-spawning?");
+	cVars[4] = CreateConVar("sm_boss_hud_x", 		"0.05", 		"X-Coordinate of the HUD display.");
+	cVars[5] = CreateConVar("sm_boss_hud_y", 		"0.05", 		"Y-Coordinate of the HUD display");
+	cVars[6] = CreateConVar("sm_healthbar_type", 	"3", 			"What kind of healthbar to display? [0:None | 1:HUDBar | 2:HUDText | 3:Both]");
 
-	RegAdminCmd("sm_getcoords", GetCoords, ADMFLAG_GENERIC, "Get the Coordinates of your cursor.");
-	RegAdminCmd("sm_reloadbossconfig", ReloadConfig, ADMFLAG_GENERIC, "Reloads the boss configs.");
-	RegAdminCmd("sm_forceboss", ForceBoss, ADMFLAG_GENERIC, "Forces a auto-spawning boss to spawn early.");
-	RegAdminCmd("sm_fb", ForceBoss, ADMFLAG_GENERIC, "Forces a auto-spawning boss to spawn early.");
-	RegAdminCmd("sm_spawnboss", SpawnMenu, ADMFLAG_GENERIC, "Opens a menu to spawn a boss.");
-	RegAdminCmd("sm_sb", SpawnMenu, ADMFLAG_GENERIC, "Opens a menu to spawn a boss.");
-	RegAdminCmd("sm_slayboss", SlayBoss, ADMFLAG_GENERIC, "Slay all active bosses on map.");
+	RegAdminCmd("sm_getcoords", 		GetCoords, 		ADMFLAG_GENERIC, "Get the Coordinates of your cursor.");
+	RegAdminCmd("sm_forceboss", 		ForceBoss, 		ADMFLAG_GENERIC, "Forces a auto-spawning boss to spawn early.");
+	RegAdminCmd("sm_fb", 				ForceBoss, 		ADMFLAG_GENERIC, "Forces a auto-spawning boss to spawn early.");
+	RegAdminCmd("sm_spawnboss", 		SpawnMenu, 		ADMFLAG_GENERIC, "Opens a menu to spawn a boss.");
+	RegAdminCmd("sm_sb", 				SpawnMenu, 		ADMFLAG_GENERIC, "Opens a menu to spawn a boss.");
+	RegAdminCmd("sm_slayboss", 			SlayBoss, 		ADMFLAG_GENERIC, "Slay all active bosses on map.");
 	
-	//hHUD = CreateHudSynchronizer();
-	//jHUD = CreateHudSynchronizer();
+	HookEvent("teamplay_round_start", 			RoundStart);
+	HookEvent("pumpkin_lord_summoned", 			Boss_Summoned, 		EventHookMode_Pre);
+	HookEvent("pumpkin_lord_killed", 			Boss_Killed, 		EventHookMode_Pre);
+	HookEvent("merasmus_summoned", 				Boss_Summoned, 		EventHookMode_Pre);
+	HookEvent("merasmus_killed", 				Boss_Killed, 		EventHookMode_Pre);
+	HookEvent("eyeball_boss_summoned", 			Boss_Summoned, 		EventHookMode_Pre);
+	HookEvent("eyeball_boss_killed", 			Boss_Killed, 		EventHookMode_Pre);
+	HookEvent("merasmus_escape_warning", 		Merasmus_Leave, 	EventHookMode_Pre);
+	HookEvent("eyeball_boss_escape_imminent", 	Monoculus_Leave, 	EventHookMode_Pre);
 	
-	HookEvent("teamplay_round_start", RoundStart);
-	HookEvent("pumpkin_lord_summoned", Boss_Summoned, EventHookMode_Pre);
-	HookEvent("pumpkin_lord_killed", Boss_Killed, EventHookMode_Pre);
-	HookEvent("merasmus_summoned", Boss_Summoned, EventHookMode_Pre);
-	HookEvent("merasmus_killed", Boss_Killed, EventHookMode_Pre);
-	HookEvent("eyeball_boss_summoned", Boss_Summoned, EventHookMode_Pre);
-	HookEvent("eyeball_boss_killed", Boss_Killed, EventHookMode_Pre);
-	HookEvent("merasmus_escape_warning", Merasmus_Leave, EventHookMode_Pre);
-	HookEvent("eyeball_boss_escape_imminent", Monoculus_Leave, EventHookMode_Pre);
+	HookUserMessage(GetUserMessageId("SayText2"), SayText2, true);
 
-	for(int i = 0; i < 6; i++)
+	for(int i = 0; i < 7; i++)
 		cVars[i].AddChangeHook(cVarChange);
 	
 	gArray = new ArrayList();
-	//gHArray = new ArrayList();
-	//gCArray = new ArrayList();
-	//dataArray = new ArrayList();
 	gData = new ArrayList();
+	CreateTimer(0.5, HealthTimer, _);
 
 	LoadTranslations("common.phrases");
 	LoadTranslations("bossspawner.phrases");
@@ -153,8 +123,8 @@ public void OnPluginStart() {
 }
 
 public void OnPluginEnd() {
-	RemoveExistingBoss();
 	ClearTimer(cTimer);
+	RemoveExistingBoss();
 	//reset flags for cheat cmds lifetime
 	int flags = GetCommandFlags("tf_eyeball_boss_lifetime");
 	SetCommandFlags("tf_eyeball_boss_lifetime", flags|FCVAR_CHEAT);
@@ -163,11 +133,12 @@ public void OnPluginEnd() {
 }
 
 public void OnConfigsExecuted() {
-	sMode = GetConVarInt(cVars[1]);
-	sInterval = GetConVarFloat(cVars[2]);
-	sMin = GetConVarFloat(cVars[3]);
-	sHUDx = GetConVarFloat(cVars[4]);
-	sHUDy = GetConVarFloat(cVars[5]);
+	sMode 		= 	GetConVarInt(cVars[1]);
+	sInterval 	= 	GetConVarFloat(cVars[2]);
+	sMin		= 	GetConVarFloat(cVars[3]);
+	sHUDx 		= 	GetConVarFloat(cVars[4]);
+	sHUDy 		= 	GetConVarFloat(cVars[5]);
+	sHealthBar 	= 	GetConVarInt(cVars[6]);
 	SetupMapConfigs("bossspawner_maps.cfg");
 	SetupBossConfigs("bossspawner_boss.cfg");
 	SetupDownloads("bossspawner_downloads.cfg");
@@ -190,13 +161,13 @@ public void RemoveBossLifeline(const char[] command, const char[] execute, int d
 }
 
 public void OnMapEnd() {
-	RemoveExistingBoss();
 	ClearTimer(cTimer);
+	RemoveExistingBoss();
 }
 
 public void OnClientPostAdminCheck(int client) {
 	if(GetClientCount(true) == sMin) {
-		if(gHCount == 0) {
+		if(g_AutoBoss == 0) {
 			ResetTimer();
 		}
 	}
@@ -205,8 +176,8 @@ public void OnClientPostAdminCheck(int client) {
 
 public void OnClientDisconnect(int client) {
 	if(GetClientCount(true) < sMin) {
-		RemoveExistingBoss();
 		ClearTimer(cTimer);
+		RemoveExistingBoss();
 	}
 }
 
@@ -227,13 +198,13 @@ public void cVarChange(Handle convar, char[] oldValue, char[] newValue) {
 		else sMin = iNewValue;
 		
 		if(GetClientCount(true) >= sMin) {
-			if(gHCount == 0) {
+			if(g_AutoBoss == 0) {
 				ResetTimer();
 			}
 		}
 		else {
-			RemoveExistingBoss();
 			ClearTimer(cTimer);
+			RemoveExistingBoss();
 		}
 	}
 	else if(convar == cVars[4]) {
@@ -242,15 +213,40 @@ public void cVarChange(Handle convar, char[] oldValue, char[] newValue) {
 	else if(convar == cVars[5]) {
 		sHUDy = iNewValue;
 	}
+	else if(convar == cVars[6]) {
+		sHealthBar = RoundFloat(iNewValue);
+	}
+}
+
+public Action SayText2(UserMsg msg_id, Handle bf, int[] players, int playersNum, bool reliable, bool init) {
+	if(!reliable) 
+		return Plugin_Continue;
+	
+	char buffer[128];
+	BfReadByte(bf);
+	BfReadByte(bf);
+	
+	BfReadString(bf, buffer, sizeof(buffer));
+	
+	if(StrEqual(buffer, "#TF_Halloween_Boss_Killers")) {
+		return Plugin_Handled;
+	}
+	if(StrEqual(buffer, "#TF_Halloween_Eyeball_Boss_Killers")) {
+		return Plugin_Handled;
+	}
+	if(StrEqual(buffer, "#TF_Halloween_Merasmus_Killers")) {
+		return Plugin_Handled;
+	}
+	return Plugin_Continue;
 }
 
 /* -----------------------------------EVENT HANDLES-----------------------------------*/
 public Action RoundStart(Handle event, const char[] name, bool dontBroadcast) {
-	gHCount = 0;
+	g_AutoBoss = 0;
 	if(!gEnabled) return Plugin_Continue;
 	ClearTimer(cTimer);
 	if(GetClientCount(true) >= sMin) {
-		if(gHCount == 0) {
+		if(g_AutoBoss == 0) {
 			ResetTimer();
 		}
 	}
@@ -285,7 +281,7 @@ public Action ForceBoss(int client, int args) {
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	if(gHCount == 0) {
+	if(g_AutoBoss == 0) {
 		gActiveTimer = true;
 		if(args == 1) {
 			saveIndex = gIndex;
@@ -344,18 +340,10 @@ public Action SlayBoss(int client, int args) {
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	RemoveExistingBoss();
-	gHCount = 0; //All bosses slain, set boss counter back to 0
-	CPrintToChatAll("%t", "Boss_Slain");
-	return Plugin_Handled;
-}
-
-public Action ReloadConfig(int client, int args) {
 	ClearTimer(cTimer);
-	SetupMapConfigs("bossspawner_maps.cfg");
-	SetupBossConfigs("bossspawner_boss.cfg");
-	SetupDownloads("bossspawner_downloads.cfg");
-	CReplyToCommand(client, "{frozen}[Boss] {orange}Configs have been reloaded!");
+	RemoveExistingBoss();
+	g_AutoBoss = 0; //All bosses slain, set boss counter back to 0
+	CReplyToCommand(client, "%t", "Boss_Slain");
 	return Plugin_Handled;
 }
 
@@ -364,7 +352,6 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 	int args = ExplodeString(sArgs, " ", arg, sizeof(arg), sizeof(arg[]));
 	//int returnType = 0;
 	if(arg[0][0] == '!' || arg[0][0] == '/') {
-		//if(arg[0][0] == '/') returnType = 1;
 		strcopy(arg[0], 64, arg[0][1]);
 	}
 	else return Plugin_Continue;
@@ -381,21 +368,6 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 	if(i == gArray.Length) {
 		return Plugin_Continue;
 	}
-	/*if(returnType == 0) {
-		char name[64];
-		GetClientName(client, name, sizeof(name));
-		int team = GetClientTeam(client);
-		if(StrEqual(command, "say")) {
-			CPrintToChatAllEx(client, "{teamcolor}%s :  {default}%s", name, sArgs);
-		}
-		else if(StrEqual(command, "say_team")) {
-			for(int j = 1; j <= MaxClients; j++) {
-				int iTeam = GetClientTeam(j);
-				if(team != iTeam) continue;
-				CPrintToChatEx(j, client, "{default}(TEAM){teamcolor}%s :  {default}%s", name, sArgs);
-			}
-		}
-	}*/
 	if(!gEnabled) {
 		CPrintToChat(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
@@ -413,10 +385,11 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 		return Plugin_Handled;
 	}
 	kPos[2] -= 10.0;
-	int iBaseHP = -1, iGlow = -1;
+	int iBaseHP = -1, iScaleHP = -1, iGlow = -1;
 	float iSize = -1.0;
 	if(args > 1) {
 		iBaseHP = StringToInt(arg[1]);
+		iScaleHP = 0;
 	}
 	if(args > 2) {
 		iSize = StringToFloat(arg[2]);
@@ -426,7 +399,7 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 	}
 	gIndexCmd = i;
 	gActiveTimer = false;
-	CreateBoss(gIndexCmd, kPos, iBaseHP, 0, iSize, iGlow, true);
+	CreateBoss(gIndexCmd, kPos, iBaseHP, iScaleHP, iSize, iGlow, true);
 	return Plugin_Handled;
 }
 
@@ -466,11 +439,12 @@ public Action SpawnBossCommand(int client, const char[] command, int args) {
 		return Plugin_Handled;
 	}
 	kPos[2] -= 10.0;
-	int iBaseHP = -1, iGlow = -1;
+	int iBaseHP = -1, iScaleHP = -1, iGlow = -1;
 	float iSize = -1.0;
 	if(args > 0) {
 		GetCmdArg(1, arg1, sizeof(arg1));
 		iBaseHP = StringToInt(arg1);
+		iScaleHP = 0;
 	}
 	if(args > 1) {
 		GetCmdArg(2, arg2, sizeof(arg2));
@@ -482,7 +456,7 @@ public Action SpawnBossCommand(int client, const char[] command, int args) {
 	}
 	gIndexCmd = i;
 	gActiveTimer = false;
-	CreateBoss(gIndexCmd, kPos, iBaseHP, 0, iSize, iGlow, true);
+	CreateBoss(gIndexCmd, kPos, iBaseHP, iScaleHP, iSize, iGlow, true);
 	return Plugin_Handled;
 }
 
@@ -491,7 +465,7 @@ public Action SpawnMenu(int client, int args) {
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	if(!IsClientInGame(client) || !IsPlayerAlive(client)) {
+	if(!IsClientInGame(client)) {
 		CReplyToCommand(client, "{frozen}[Boss] You must be alive and in-game to use this command.");
 		return Plugin_Handled;
 	}
@@ -521,20 +495,11 @@ public int DisplayHealth(Menu MenuHandle, MenuAction action, int client, int num
 		Menu menu = new Menu(DisplaySizes);
 		menu.SetTitle("Boss Health");
 		char param[32];
-		Format(param, sizeof(param), "%s 1000", info);
-		menu.AddItem(param, "1000");
-		Format(param, sizeof(param), "%s 5000", info);
-		menu.AddItem(param, "5000");
-		Format(param, sizeof(param), "%s 10000", info);
-		menu.AddItem(param, "10000");
-		Format(param, sizeof(param), "%s 15000", info);
-		menu.AddItem(param, "15000");
-		Format(param, sizeof(param), "%s 20000", info);
-		menu.AddItem(param, "20000");
-		Format(param, sizeof(param), "%s 30000", info);
-		menu.AddItem(param, "30000");
-		Format(param, sizeof(param), "%s 50000", info);
-		menu.AddItem(param, "50000");
+		char health[][] = {"1000", "5000", "10000", "15000", "20000", "30000", "50000"};
+		for(int i = 0; i < sizeof(health); i++) {
+			Format(param, sizeof(param), "%s %s", info, health[i]);
+			menu.AddItem(param, health[i]);
+		}
 		SetMenuExitButton(menu, true);
 		menu.ExitButton = true;
 		menu.Display(client, MENU_TIME_FOREVER);
@@ -551,20 +516,11 @@ public int DisplaySizes(Menu MenuHandle, MenuAction action, int client, int num)
 		Menu menu = new Menu(DisplayGlow);
 		menu.SetTitle("Boss Size");
 		char param[32];
-		Format(param, sizeof(param), "%s 0.5", info);
-		menu.AddItem(param, "0.5");
-		Format(param, sizeof(param), "%s 1.0", info);
-		menu.AddItem(param, "1.0");
-		Format(param, sizeof(param), "%s 1.5", info);
-		menu.AddItem(param, "1.5");
-		Format(param, sizeof(param), "%s 2.0", info);
-		menu.AddItem(param, "2.0");
-		Format(param, sizeof(param), "%s 3.0", info);
-		menu.AddItem(param, "3.0");
-		Format(param, sizeof(param), "%s 4.0", info);
-		menu.AddItem(param, "4.0");
-		Format(param, sizeof(param), "%s 5.0", info);
-		menu.AddItem(param, "5.0");
+		char size[][] = {"0.5", "1.0", "1.5", "2.0", "3.0", "4.0", "5.0"};
+		for(int i = 0; i < sizeof(size); i++) {
+			Format(param, sizeof(param), "%s %s", info, size[i]);
+			menu.AddItem(param, size[i]);
+		}
 		SetMenuExitButton(menu, true);
 		menu.ExitButton = true;
 		menu.Display(client, MENU_TIME_FOREVER);
@@ -651,7 +607,7 @@ public bool TraceentFilterPlayer(int ent, int contentsMask) {
 
 /* --------------------------------BOSS SPAWNING CORE---------------------------------*/
 void SpawnBoss(int iBaseHP, float iSize, int iGlow) {
-	int iScaleHP;
+	int iScaleHP = -1;
 	if(iBaseHP != -1) {
 		iScaleHP = 0;
 	}
@@ -677,6 +633,10 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	HashMap.GetString("Name", sName, sizeof(sName));
 	HashMap.GetString("Model", sModel, sizeof(sModel));
 	HashMap.GetString("Type", sType, sizeof(sType));
+	HashMap.GetString("Base", sBase, sizeof(sBase));
+	HashMap.GetString("Scale", sScale, sizeof(sScale));
+	HashMap.GetString("Size", sSize, sizeof(sSize));
+	HashMap.GetString("Glow", sGlow, sizeof(sGlow));
 	HashMap.GetString("PosFix", sPosFix, sizeof(sPosFix));
 	HashMap.GetString("Lifetime", sLifetime, sizeof(sLifetime));
 	HashMap.GetString("Position", sPosition, sizeof(sPosition));
@@ -688,19 +648,15 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	HashMap.GetString("HatSize", sHatSize, sizeof(sHatSize));
 	
 	if(iBaseHP == -1) {
-		HashMap.GetString("Base", sBase, sizeof(sBase));
 		iBaseHP = StringToInt(sBase);
 	}
 	if(iScaleHP == -1) {
-		HashMap.GetString("Scale", sScale, sizeof(sScale));
 		iScaleHP = StringToInt(sScale);
 	}
 	if(iSize == -1.0) {
-		HashMap.GetString("Size", sSize, sizeof(sSize));
 		iSize = StringToFloat(sSize);
 	}
 	if(iGlow == -1) {
-		HashMap.GetString("Glow", sGlow, sizeof(sGlow));
 		iGlow = StrEqual(sGlow, "Yes") ? 1 : 0;
 	}
 	if(strlen(sPosition) != 0 && !isCMD) {
@@ -710,31 +666,33 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			temp[i] = StringToFloat(sPos[i]);
 	}
 	temp[2] += StringToFloat(sPosFix);
-	gIsMultiSpawn = StringToInt(sHorde) <= 1 ? 1 : StringToInt(sHorde);
-	int iMax = gIsMultiSpawn;
+	int iMax = StringToInt(sHorde) <= 1 ? 1 : StringToInt(sHorde);
 	int playerCounter = GetClientCount(true);
-	int sHealth = (iBaseHP + iScaleHP*playerCounter)*(iMax != 1 ? 1 : 10); 
-	//StringMap tempHash = new StringMap();
-	//int[] tempArray = new int[iMax];
-	ArrayList dReference = new ArrayList();
+	int sHealth = (iBaseHP + iScaleHP*playerCounter)*(iMax != 1 ? 1 : 10);
+	DataPack dMax = new DataPack();
+	dMax.WriteCell(iMax);
 	for(int i = 0; i < iMax; i++) {
-		//char stringIndex[16];
-		//Format(stringIndex, sizeof(stringIndex), "%d", index);
 		int ent = CreateEntityByName(sType);
-		//tempArray[i] = EntIndexToEntRef(ent);
-		dReference.Push(iMax);
+		ArrayList dReference = new ArrayList();
+		dReference.Push(dMax);
 		dReference.Push(EntIndexToEntRef(ent));
 		dReference.Push(index);
 		dReference.Push(gActiveTimer);
-		//gData.WriteCell(dReference);
 		gData.Push(dReference);
+		
 		TeleportEntity(ent, temp, NULL_VECTOR, NULL_VECTOR);
 		DispatchSpawn(ent);
-		SetEntProp(ent, Prop_Data, "m_iHealth", sHealth);
-		SetEntProp(ent, Prop_Data, "m_iMaxHealth", sHealth); 
-		SetEntProp(ent, Prop_Data, "m_iTeamNum", 0);
-		//SetEntPropString(ent, Prop_Data, "m_iName", stringIndex);
-		SetEntProp(ent, Prop_Data, "m_iTeamNum", StrEqual(sType, MONOCULUS) ? 5 : 0);
+		
+		SetSize(iSize, ent);
+		SetGlow(iGlow, ent);
+		
+		SetEntProp		(ent, Prop_Data, "m_iHealth", 		sHealth);
+		SetEntProp		(ent, Prop_Data, "m_iMaxHealth", 	sHealth); 
+		SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		0);
+		SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		StrEqual(sType, MONOCULUS) ? 5 : 0);
+		//speed don't work! -.-
+		//SetEntPropFloat	(ent, Prop_Data, "m_flSpeed", 	0.0);
+		
 		if(strlen(sColor) != 0) {
 			if(StrEqual(sColor, "Red", false)) SetEntProp(ent, Prop_Send, "m_nSkin", 0);
 			else if(StrEqual(sColor, "Blue", false)) SetEntProp(ent, Prop_Send, "m_nSkin", 1);
@@ -745,22 +703,21 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		if(strlen(sModel) != 0) {
 			SetEntityModel(ent, sModel);
 		}
-		if(gActiveTimer) gHCount++;
-		/*if(gActiveTimer == true) {
-			//gHArray.Push(EntIndexToEntRef(ent));
-			gHCount++;
-		}
-		else {
-			//gCArray.Push(EntIndexToEntRef(ent));
-			gCCount++; gccount no longer used
-		}*/
+		
+		if(gActiveTimer) 
+			g_AutoBoss++;
+			
 		if(i == 0) {
-			DataPack hPack = new DataPack();
-			CreateDataTimer(StringToFloat(sLifetime), RemoveTimerPrint, hPack);
-			hPack.WriteCell(index);
+			DataPack hPack;
+			CreateDataTimer(1.0, RemoveTimerPrint, hPack, TIMER_REPEAT);
 			hPack.WriteCell(EntIndexToEntRef(ent));
+			hPack.WriteCell(StringToFloat(sLifetime));
+			hPack.WriteCell(index);
 		}
-		CreateTimer(StringToFloat(sLifetime), RemoveTimer, EntIndexToEntRef(ent));
+		DataPack jPack;
+		CreateDataTimer(1.0, RemoveTimer, jPack, TIMER_REPEAT);
+		jPack.WriteCell(EntIndexToEntRef(ent));
+		jPack.WriteCell(StringToFloat(sLifetime));
 		if(strlen(sHModel) != 0) {
 			int hat = CreateEntityByName("prop_dynamic_override");
 			DispatchKeyValue(hat, "model", sHModel);
@@ -770,6 +727,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			//Hacky tacky way..
 			//SetEntPropFloat(hat, Prop_Send, "m_flModelScale", iSize > 5 ? (iSize > 10 ? (iSize/5+0.80) : (iSize/4+0.75)) : (iSize/3+0.66));
 			SetEntPropFloat(hat, Prop_Send, "m_flModelScale", StringToFloat(sHatSize));
+			//SetEntPropFloat(hat, Prop_Send, "m_flModelScale", iSize*StringToFloat(sHatSize));
 			DispatchSpawn(hat);	
 			
 			SetVariantString("!activator");
@@ -783,109 +741,95 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 				AcceptEntityInput(hat, "SetParentAttachmentMaintainOffset", ent, ent, 0);
 			}
 			float hatpos[3];
-			hatpos[2] += StringToFloat(sHatPosFix); //-9.5*iSize
+			hatpos[2] += StringToFloat(sHatPosFix);//*iSize; //-9.5*iSize
+			//hatpos[0] += -5.0;
 			TeleportEntity(hat, hatpos, NULL_VECTOR, NULL_VECTOR);
 		}
-		SetSize(iSize, ent);
-		SetGlow(iGlow, ent);
 	}
-	//tempHash.SetArray("Entities", tempArray, iMax, true);
-	//tempHash.SetValue("Index", index, true);
-	//tempHash.SetValue("Timed", gActiveTimer, true);
-	//tempHash.SetValue("Max", iMax, true);
-	//dataArray.Push(tempHash);
-	//PrintToChatAll("%d", dataArray.Length);
 	
 	if(!StrEqual(sISound, "none", false)) {
 		EmitSoundToAll(sISound, _, _, _, _, 1.0);
 	}
 	ReplaceString(sName, sizeof(sName), "_", " ");
 	CPrintToChatAll("%t", "Boss_Spawn", sName);
+	
 	if(argIndex == 1) {
 		gIndex = saveIndex;
 	}
+	
 	if(gActiveTimer == true) {
 		gIndex++;
 		if(gIndex > gArray.Length-1) gIndex = 0;
 	}
 }
 
-public Action RemoveTimer(Handle hTimer, any ref) {
-	int ent = EntRefToEntIndex(ref);
+public Action RemoveTimer(Handle hTimer, DataPack jPack) {
+	jPack.Reset();
+	int ent = EntRefToEntIndex(jPack.ReadCell());
 	if(IsValidEntity(ent)) {
-		AcceptEntityInput(ent, "Kill");
-	}
-	
-	/*for(int i = 0; i < gHArray.Length; i++) {
-		int ent = EntRefToEntIndex(gHArray.Get(i));
-		if(IsValidEntity(ent)) {
+		float tcounter = jPack.ReadCell();
+		if(tcounter <= 0.0) {
 			AcceptEntityInput(ent, "Kill");
+			return Plugin_Stop;
+		}
+		else {
+			tcounter -= 1.0;
+			jPack.Reset();
+			jPack.ReadCell();
+			jPack.WriteCell(tcounter);
+			return Plugin_Continue;
 		}
 	}
-	for(int i = 0; i < gCArray.Length; i++) {
-		int ent = EntRefToEntIndex(gCArray.Get(i));
-		if(IsValidEntity(ent)) {
-			AcceptEntityInput(ent, "Kill");
-		}
-	}*/
-	/*
-	if(jHUD != null) {
-		for(int j = 1; j <= MaxClients; j++) {
-			if(IsClientInGame(j))
-				ClearSyncHud(j, jHUD);
-		}
-		jHUD = null;
-		CloseHandle(jHUD);
-	}*/
+	return Plugin_Stop;
 }
 
 public Action RemoveTimerPrint(Handle hTimer, DataPack hPack) {
 	hPack.Reset();
-	int index = hPack.ReadCell();
 	int ent = EntRefToEntIndex(hPack.ReadCell());
 	if(IsValidEntity(ent)) {
-		char sName[64];
-		StringMap HashMap = gArray.Get(index);
-		HashMap.GetString("Name", sName, sizeof(sName));
-		CPrintToChatAll("%t", "Boss_Left", sName);
+		float tcounter = hPack.ReadCell();
+		if(tcounter <= 0.0) {
+			int index = hPack.ReadCell();
+			char sName[64];
+			StringMap HashMap = gArray.Get(index);
+			HashMap.GetString("Name", sName, sizeof(sName));
+			CPrintToChatAll("%t", "Boss_Left", sName);
+			return Plugin_Stop;
+		}
+		else {
+			tcounter -= 1.0;
+			hPack.Reset();
+			hPack.ReadCell();
+			hPack.WriteCell(tcounter);
+			return Plugin_Continue;
+		}
 	}
+	return Plugin_Stop;
 }
 
 //Instead of hooking to sdkhook_takedamage, we use a 0.5 timer because of hud overloading when taking damage
 public Action HealthTimer(Handle hTimer, any ref) {
-	if(IsValidEntity(gTrack)) {
+	if(sHealthBar == 0 || sHealthBar == 1) {
+		CreateTimer(0.5, HealthTimer, _);
+		return Plugin_Continue;
+	}
+	if(gTrack != -1 && IsValidEntity(gTrack)) {
 		int HP = GetEntProp(gTrack, Prop_Data, "m_iHealth");
 		int maxHP = GetEntProp(gTrack, Prop_Data, "m_iMaxHealth");
 		int currentHP = RoundFloat(HP - maxHP * 0.9);
 		if(currentHP > maxHP*0.1*0.65) SetHudTextParams(0.46, 0.12, 0.5, 0, 255, 0, 255);
 		else if(maxHP*0.1*0.25 < currentHP < maxHP*0.1*0.65) SetHudTextParams(0.46, 0.12, 0.5, 255, 255, 0, 255);
 		else SetHudTextParams(0.46, 0.12, 0.5, 255, 0, 0, 255);
+		if(currentHP < 0) currentHP = 0;
 		for(int i = 1; i <= MaxClients; i++) {
 			if(IsClientInGame(i)) {
 				ShowHudText(i, -1, "HP: %d", currentHP);
 			}
 		}
-		CreateTimer(0.5, HealthTimer, _);
-		return Plugin_Continue;
 	}
-	return Plugin_Stop;
+	CreateTimer(0.5, HealthTimer, _);
+	return Plugin_Continue;
 }
-/*
-void RemoveExistingBoss() {
-	for(int i = 0; i < dataArray.Length; i++) {
-		StringMap tempHash = dataArray.Get(i);
-		int iMax;
-		tempHash.GetValue("Max", iMax);
-		int[] tempArray = new int[iMax];
-		tempHash.GetArray("Entities", tempArray, iMax);
-		for(int j = 0; j < iMax; j++) {
-			int ent = EntRefToEntIndex(tempArray[j]);
-			if(!IsValidEntity(ent)) continue;
-			AcceptEntityInput(ent, "kill");
-		}
-	}
-}*/
-
 
 void RemoveExistingBoss() {
 	int ent = -1;
@@ -919,12 +863,12 @@ void SetGlow(int value, int ent) {
 
 void SetSize(float value, int ent) {
 	if(IsValidEntity(ent)) {
-		SetEntPropFloat(ent, Prop_Send, "m_flModelScale", value);
 		ResizeHitbox(ent, value);
+		SetEntPropFloat(ent, Prop_Send, "m_flModelScale", value);
 	}
 }
 
-void ResizeHitbox(int entity, float fScale = 1.0) {
+void ResizeHitbox(int entity, float fScale) {
 	float vecBossMin[3], vecBossMax[3];
 	GetEntPropVector(entity, Prop_Send, "m_vecMins", vecBossMin);
 	GetEntPropVector(entity, Prop_Send, "m_vecMaxs", vecBossMax);
@@ -936,6 +880,7 @@ void ResizeHitbox(int entity, float fScale = 1.0) {
 	
 	ScaleVector(vecScaledBossMin, fScale);
 	ScaleVector(vecScaledBossMax, fScale);
+	
 	SetEntPropVector(entity, Prop_Send, "m_vecMins", vecScaledBossMin);
 	SetEntPropVector(entity, Prop_Send, "m_vecMaxs", vecScaledBossMax);
 }
@@ -950,23 +895,14 @@ public void HUDTimer() {
 
 public Action HUDCountDown(Handle hTimer) {
 	sInterval--;
-	/*for(int i = 1; i <= MaxClients; i++) {
-		if(IsClientInGame(i))
-			ClearSyncHud(i, hHUD);
-	}*/
 	for(int i = 1; i <= MaxClients; i++) {
 		if(IsClientInGame(i)) {
 			SetHudTextParams(sHUDx, sHUDy, 1.0, 255, 255, 255, 255);
-			//ShowSyncHudText(i, hHUD, "Boss: %d seconds", RoundFloat(sInterval));
 			ShowHudText(i, -1, "Boss: %d seconds", RoundFloat(sInterval));
 		}
 	}
 	if(sInterval <= 0) {
 		SpawnBoss(-1,-1.0,-1);
-		/*for(int i = 1; i <= MaxClients; i++) {
-			if(IsClientInGame(i))
-				ClearSyncHud(i, hHUD);
-		}*/
 		cTimer = null;
 		return Plugin_Stop;
 	}
@@ -985,9 +921,9 @@ public void OnEntityCreated(int ent, const char[] classname) {
 	if(!gEnabled) return;
 	if(StrEqual(classname, "monster_resource")) {
 		gHPbar = ent;
-		//jHUD = CreateHudSynchronizer();
 	}
-	else if((StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) || StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON))) {
+	else if((StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) 
+	|| StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON))) {
 		/* Too lazy to work on this
 		if(StrEqual(classname, SKELETON)) {
 			for(int i = 1; i <= MaxClients; i++) {
@@ -1005,10 +941,8 @@ public void OnEntityCreated(int ent, const char[] classname) {
 			}			
 		}*/
 		gTrack = ent;
-		RequestFrame(UpdateBossHealth, ent);
-		//SDKHook(ent, SDKHook_SpawnPost, UpdateBossHealth);
 		SDKHook(ent, SDKHook_OnTakeDamagePost, OnBossDamaged);
-		CreateTimer(0.5, HealthTimer, _);
+		RequestFrame(UpdateBossHealth, EntRefToEntIndex(ent));
 	}
 	else if(StrEqual(classname, "prop_dynamic")) {
 		RequestFrame(OnPropSpawn, EntIndexToEntRef(ent));
@@ -1019,7 +953,6 @@ public void OnEntityDestroyed(int ent) {
 	if(!gEnabled) return;
 	if(!IsValidEntity(ent)) return;
 	if(ent == gTrack) {
-		//need to fix this later but too lazy atm
 		gTrack = FindEntityByClassname(-1, HORSEMAN);
 		if(gTrack == ent) {
 			gTrack = FindEntityByClassname(ent, HORSEMAN);
@@ -1027,7 +960,7 @@ public void OnEntityDestroyed(int ent) {
 		if(gTrack == -1) {
 			gTrack = FindEntityByClassname(-1, MONOCULUS);
 			if(gTrack == ent) {
-				gTrack = FindEntityByClassname(ent, HORSEMAN);
+				gTrack = FindEntityByClassname(ent, MONOCULUS);
 			}
 		}
 		if(gTrack == -1) {
@@ -1042,39 +975,40 @@ public void OnEntityDestroyed(int ent) {
 				gTrack = FindEntityByClassname(ent, SKELETON);
 			}
 		}
-		if (gTrack != -1) {
+		if(gTrack != -1) {
 			SDKHook(gTrack, SDKHook_OnTakeDamagePost, OnBossDamaged);
 		}
-		RequestFrame(UpdateBossHealth, gTrack);
+		RequestFrame(UpdateBossHealth, EntRefToEntIndex(gTrack));
 	}
-	for(int i = gData.Length-1; i >= 0; --i) {
+	for(int i = gData.Length-1; i >= 0; i--) {
 		ArrayList dReference = gData.Get(i);
 		int dEnt = EntRefToEntIndex(dReference.Get(1));
 		if(ent == dEnt) {
-			int dMax = dReference.Get(0);
+			DataPack dMax = dReference.Get(0);
+			dMax.Reset();
+			int iMax = dMax.ReadCell();
 			int index = dReference.Get(2);
 			int timed = dReference.Get(3);
-			dMax -= 1;
+			iMax -= 1;
+			dMax.Reset();
+			dMax.WriteCell(iMax);
 			dReference.Set(0, dMax);
 			gData.Erase(i);
-			if(dMax == 0) {
+			if(iMax == 0) {
 				StringMap HashMap = gArray.Get(index);
 				char sDSound[256];
 				HashMap.GetString("DeathSound", sDSound, sizeof(sDSound));
 				if(!StrEqual(sDSound, "none", false)) {
 					EmitSoundToAll(sDSound, _, _, _, _, 1.0);
 				}
-				if(GetClientCount(true) >= sMin) {
-					HUDTimer();
-					CPrintToChatAll("%t", "Time", RoundFloat(sInterval));
-				}
 				if(timed && GetClientCount(true) >= sMin) {
 					HUDTimer();
 					CPrintToChatAll("%t", "Time", RoundFloat(sInterval));
 				}
-				delete dReference;
-				break;
+				delete dMax;
 			}
+			delete dReference;
+			break;
 		}
 	}
 }
@@ -1091,7 +1025,7 @@ public void OnPropSpawn(any ref) {
 			ArrayList dReference = gData.Get(i);
 			int dEnt = EntRefToEntIndex(dReference.Get(1));
 			int dIndex = dReference.Get(2);
-			if(ent == dEnt) {
+			if(parent == dEnt) {
 				char sWModel[256];
 				StringMap HashMap = gArray.Get(dIndex);
 				HashMap.GetString("WeaponModel", sWModel, sizeof(sWModel));
@@ -1107,46 +1041,8 @@ public void OnPropSpawn(any ref) {
 				break;
 			}
 		}
-		/*int bIndex = -1;
-		//PrintToChatAll("%d", dataArray.Length);
-		for(int i = 0; i < dataArray.Length; i++) {
-			StringMap tempHash = dataArray.Get(i);
-			int iMax, tBreak;
-			tempHash.GetValue("Max", iMax);
-			int[] tempArray = new int[iMax];
-			for(int j = 0; j < iMax; j++) {
-				if(EntRefToEntIndex(tempArray[j]) == parent) {
-					bIndex = j;
-					tBreak = 1;
-					break;
-				}
-			}
-			if(tBreak == 1) {
-				break;
-			}
-		}
-		if(bIndex == -1) return;
-		char sWModel[256];
-		StringMap HashMap = gArray.Get(bIndex);
-		HashMap.GetString("WeaponModel", sWModel, sizeof(sWModel));
-		
-		if(strlen(sWModel) != 0) {
-			if(StrEqual(sWModel, "Invisible")) {
-				SetEntityModel(ent, "");
-			}
-			else {
-				SetEntityModel(ent, sWModel);
-				SetEntPropEnt(parent, Prop_Send, "m_hActiveWeapon", ent);
-			}
-		}*/
 	}
 }
-/*
-public void OnBossSpawned(any ref) {
-	int ent = EntRefToEntIndex(ref);
-	if(!IsValidEntity(ent)) return;
-	RequestFrame(UpdateBossHealth, ref);
-}*/
 
 void FindHealthBar() {
 	gHPbar = FindEntityByClassname(-1, "monster_resource");
@@ -1159,14 +1055,7 @@ void FindHealthBar() {
 }
 
 public Action OnBossDamaged(int victim, int &attacker, int &inflictor, float &damage, int &damagetype) {
-	//char classname[32];
-	//GetEntityClassname(attacker, classname, sizeof(classname));
-	//PrintToChatAll("victim: %d | attacker: %d | damage: %f | type: %d | name: %s", victim, attacker, damage, damagetype, classname);
-	/*if(damagetype & DMG_CRUSH || damagetype & DMG_VEHICLE) {
-		damage = 0.0;
-		return Plugin_Changed;
-	}*/
-	UpdateBossHealth(victim);
+	UpdateBossHealth(EntRefToEntIndex(victim));
 }
 
 public Action OnClientDamaged(int victim, int &attacker, int &inflictor, float &damage, int &damagetype) {
@@ -1187,100 +1076,47 @@ public Action OnClientDamaged(int victim, int &attacker, int &inflictor, float &
 				return Plugin_Changed;
 			}
 		}
-		/*int bIndex = -1;
-		for(int i = 0; i < dataArray.Length; i++) {
-			StringMap tempHash = dataArray.Get(i);
-			int iMax, tBreak;
-			tempHash.GetValue("Max", iMax);
-			int[] tempArray = new int[iMax];
-			for(int j = 0; j < iMax; j++) {
-				if(EntRefToEntIndex(tempArray[j]) == attacker) {
-					bIndex = j;
-					tBreak = 1;
-					break;
-				}
-			}
-			if(tBreak == 1) {
-				break;
-			}
-		}
-		if(bIndex == -1) return Plugin_Continue;
-		for(int i = 0; i < gArray.Length; i++) {
-			if(i == bIndex) {
-				StringMap HashMap = gArray.Get(i);
-				HashMap.GetString("Damage", sDamage, sizeof(sDamage));
-				break;
-			}
-		}
-		damage = StringToFloat(sDamage);
-		return Plugin_Changed;*/
 	}
 	return Plugin_Continue;
 }
 
-public void UpdateBossHealth(int ent) {
-	//int ent = EntRefToEntIndex(ref);
-	if (gHPbar == -1) return;
+public void UpdateBossHealth(int ref) {
+	if(gHPbar == -1 || sHealthBar == 0 || sHealthBar == 2) {
+		return;
+	}
 	int percentage;
+	int ent = EntRefToEntIndex(ref);
 	if(IsValidEntity(ent)) {
 		int HP = GetEntProp(ent, Prop_Data, "m_iHealth");
 		int maxHP = GetEntProp(ent, Prop_Data, "m_iMaxHealth");
 		int currentHP = RoundFloat(HP - maxHP * 0.9);
 		if(currentHP <= 0) {
 			percentage = 0;
-			SetEntProp(ent, Prop_Data, "m_iHealth", 0);
-			
-			if(HP <= -1) {
-				SetEntProp(ent, Prop_Data, "m_takedamage", 0);
-			}
-			/*for(int i = gData.Length-1; i >= 0; i--) {
-				ArrayList dReference = gData.Get(i);
-				int dEnt = EntRefToEntIndex(dReference.Get(1));
-				if(ent == dEnt) {
-					int dIndex = dReference.Get(2);
-					char sGnome[8];
-					StringMap HashMap = gArray.Get(dIndex);
-					HashMap.GetString("Gnome", sGnome, sizeof(sGnome));
-					char classname[32];
-					GetEntityClassname(ent, classname, sizeof(classname));
-					if(StringToInt(sGnome) == 0 && StrEqual(classname, SKELETON)) {
-						AcceptEntityInput(ent, "kill");
-					}
-					break;
-				}
-			}*/
 			char classname[32];
 			GetEntityClassname(ent, classname, sizeof(classname));
 			if(StrEqual(classname, SKELETON)) {
-				AcceptEntityInput(ent, "kill");
-			}
-			/*int bIndex = -1;
-			for(int i = 0; i < dataArray.Length; i++) {
-				StringMap tempHash = dataArray.Get(i);
-				int iMax, tBreak;
-				tempHash.GetValue("Max", iMax);
-				int[] tempArray = new int[iMax];
-				for(int j = 0; j < iMax; j++) {
-					if(EntRefToEntIndex(tempArray[j]) == ent) {
-						bIndex = j;
-						tBreak = 1;
+				for(int i = gData.Length-1; i >= 0; i--) {
+					ArrayList dReference = gData.Get(i);
+					int dEnt = EntRefToEntIndex(dReference.Get(1));
+					if(ent == dEnt) {
+						int dIndex = dReference.Get(2);
+						char sGnome[8];
+						StringMap HashMap = gArray.Get(dIndex);
+						HashMap.GetString("Gnome", sGnome, sizeof(sGnome));
+						if(StringToInt(sGnome) == 0) {
+							AcceptEntityInput(ent, "kill");
+						}
 						break;
 					}
 				}
-				if(tBreak == 1) {
-					break;
+			}
+			else {
+				SetEntProp(ent, Prop_Data, "m_iHealth", 0);
+			
+				if(HP <= -1) {
+					SetEntProp(ent, Prop_Data, "m_takedamage", 0);
 				}
 			}
-			if(bIndex == -1) return;
-			char sGnome[8];
-			StringMap HashMap = gArray.Get(bIndex);
-			HashMap.GetString("Gnome", sGnome, sizeof(sGnome));
-			//This makes it so that skeleton kill die without spawning the gnome ones
-			char classname[32];
-			GetEntityClassname(ent, classname, sizeof(classname));
-			if(StringToInt(sGnome) == 0 && StrEqual(classname, SKELETON)) {
-				AcceptEntityInput(ent, "kill");
-			}*/
 		}
 		else {
 			percentage = RoundToCeil((float(HP) / float(maxHP / 10)) * 255.9);	//max 255.9 accurate at 100%
@@ -1406,7 +1242,6 @@ public void SetupBossConfigs(const char[] sFile) {
 	char sName[64], sModel[256], sType[32], sBase[16], sScale[16], sWModel[256], sSize[16], sGlow[8], sPosFix[32];
 	char sLifetime[32], sPosition[32], sHorde[8], sColor[16], sISound[256], sDSound[256], sHModel[256], sGnome[8];
 	char sHatPosFix[32], sHatSize[16], sDamage[32];
-	static int init = 0;
 	do {
 		KvGetSectionName(kv, sName, sizeof(sName));
 		KvGetString(kv, "Model", sModel, sizeof(sModel), SNULL);
@@ -1415,7 +1250,7 @@ public void SetupBossConfigs(const char[] sFile) {
 		KvGetString(kv, "HP Scale", sScale, sizeof(sScale), "1000");
 		KvGetString(kv, "WeaponModel", sWModel, sizeof(sWModel), SNULL);
 		KvGetString(kv, "Size", sSize, sizeof(sSize), "1.0");
-		KvGetString(kv, "Glow", sGlow, sizeof(sPosFix), "Yes");
+		KvGetString(kv, "Glow", sGlow, sizeof(sGlow), "Yes");
 		KvGetString(kv, "PosFix", sPosFix, sizeof(sPosFix), "0.0");
 		KvGetString(kv, "Lifetime", sLifetime, sizeof(sLifetime), "120");
 		KvGetString(kv, "Position", sPosition, sizeof(sPosition), SNULL);
@@ -1500,13 +1335,9 @@ public void SetupBossConfigs(const char[] sFile) {
 		gArray.Push(HashMap);
 		char command[64];
 		Format(command, sizeof(command), "sm_%s", sName);
-		if(init == 1) {
-			RemoveCommandListener(SpawnBossCommand, command);
-		}
 		AddCommandListener(SpawnBossCommand, command);
 	} while (KvGotoNextKey(kv));
-	init = 1;
-	CloseHandle(kv);
+	delete kv;
 	LogMessage("[Boss] Custom Boss Spawner Configuration has loaded successfully."); 
 }
 
