@@ -13,26 +13,33 @@
  *	
 Version Log:
 v.4.4  -
-	- Updated and changed the way entity data is stored, now stores in references of arraylists instead of saving data in the entity itself
-	- Changed and updated some more functions to be more object oriented
-	- sm_reloadbossconfig due to some issues with add/remove commands, just reload plugins which is better to do
-	- Fixed bug when slaying a boss and spawning another would say that the boss is still active
-	- Fixed bug where all info_target entities were getting killed off, causing issues like broken teleporters in maps
-	- Fixed bug where console would say spawn_boss_alt not found, was a typo from spawn_loot_alt
-	- Fixed DeathSound key not playing properly again on multiple boss spawns, uses datapack as references
-	- Healthbar should now work on multiple bosses properly
-	- Added cvar:sm_healthbar_type to change healthbar type, 0-off 1-hudbar 2-hudtext 3-both
-	- Improved healthbar carry over to another boss if the current one dies
-	- Healthbar no longer shows negative value when getting shot below 0 hp
-	- Fixed Health/Scale/Size/Glow not working properly even when being defined in .cfg file
-	- !sb and !spawnboss can now be used while spectating (Note: Boss will spawn directly on player that you are spectating)
-	- !slayboss command will only reply "bosses have been slain" back to user and not to all players
-	- Fixed a bug with playing disconnecting and causing the auto-spawned bosses from breaking
-	- Fixed bug with hitbox not scaling properly
-	- Fixed a memory leak on data timers
-	- Blocks the message "player has killed horseman/merasmus/monoculus" when boss dies
-	- Fixed some small typos on some functions
-	- Code cleanup of useless comments
+Added -
+	Added Cvar:sm_healthbar_type to change healthbar display type: 0-off 1-hudbar 2-hudtext 3-both
+Changes -
+	Changed the way data is stored, now uses arraylists and datapacks instead of saving in entity itself
+	Changed more code into object-oriented
+	Changed !sb and !spawnboss, can now be used while spectating (Note: Boss will spawn directly on player that you are spectating)
+	Changes !slayboss command will now only reply back to player and not to all players
+Removed -
+	Removed command:sm_reloadbossconfig, just reload plugin which is better to do
+	Blocks the message "player has killed horseman/merasmus/monoculus" when boss dies
+Fixes -
+	Fixed a bug when slaying a boss then spawning another would say the boss is still active
+	Fixed a bug where all info_target entities were getting removed by this plugin causing some map functions to break
+	Fixed a big where console would say spawn_boss_alt not found: was a typo and changed to spawn_loot_alt
+	Fixed a bug where DeathSound key would not play properly on multiple boss spawns: now uses datapacks as references
+	Fixed a bug where healthbar would not work properly on multiple bosses
+	Improved healthbar carry over to another boss when one of them dies
+	Fixed a bug where healthbar would show negative values when dying
+	Fixed a bug where health/scale/size/glow was not working properly even though it was defined in .cfg file
+	Fixed a bug with players disconnecting would cause auto-spawned bosses to break
+	Fixed a bug with hitbox not scaling properly (Note: Some models do not scale 1:1 with the hitboxes)
+	Fixed a memory leak on data timers
+Others -
+	Fixed some small typos in code
+	Cleaned up useless comments
+	
+	
 Known Issues:
 	- When tf_skeleton with a hat attacks you while standing still, his hat model may freeze until he starts moving
 	- eyeball_boss can die from collision from a payload cart, most of time in air so it doesn't matter too much
