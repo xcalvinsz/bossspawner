@@ -23,8 +23,4 @@
 		"#format"	"{1:s}"
 		"en"		"{frozen}[Boss] {orange}{1} has left the map due to boredom."
 	}
-	"Boss_Active"
-	{
-		"en"		"{frozen}[Boss] {orange}Can not spawn, a boss is already active."
-	}
 }

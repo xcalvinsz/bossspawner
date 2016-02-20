@@ -3,7 +3,7 @@
  *	
  *	[TF2] Custom Boss Spawner
  *	Alliedmodders: https://forums.alliedmods.net/showthread.php?t=218119
- *	Current Version: 4.4.1
+ *	Current Version: 4.4.2
  *
  *	Written by Tak (Chaosxk)
  *	https://forums.alliedmods.net/member.php?u=87026
@@ -12,6 +12,9 @@
  *	If you have paid for this plugin, get your money back.
  *	
 Version Log:
+v.4.4.2 -
+	Fixed crashing problem with convar changing version number
+	Removed !forceboss restriction to 1 boss, you can now spawn multiple bosses with that command
 v.4.4.1 -
 	Fixed a bug where bosses that die normally then trying to use the command !fb would say boss is already spawned
 	Fixed a bug where manual spawned bosses would get killed on on player disconnecting
@@ -60,7 +63,7 @@ Known Issues:
 #include <sourcemod>
 #include <sdkhooks>
 
-#define PLUGIN_VERSION "4.4.1"
+#define PLUGIN_VERSION "4.4.2"
 #define INTRO_SND	"ui/halloween_boss_summoned_fx.wav"
 #define DEATH_SND	"ui/halloween_boss_defeated_fx.wav"
 #define HORSEMAN	"headless_hatman"
@@ -124,7 +127,7 @@ public void OnPluginStart() {
 	
 	HookUserMessage(GetUserMessageId("SayText2"), SayText2, true);
 
-	for(int i = 0; i < 7; i++)
+	for(int i = 1; i < 7; i++)
 		cVars[i].AddChangeHook(cVarChange);
 	
 	gArray = new ArrayList();
@@ -133,7 +136,7 @@ public void OnPluginStart() {
 
 	LoadTranslations("common.phrases");
 	LoadTranslations("bossspawner.phrases");
-	AutoExecConfig(true, "bossspawner");
+	AutoExecConfig(false, "bossspawner");
 }
 
 public void OnPluginEnd() {
@@ -202,10 +205,7 @@ public void cVarChange(Handle convar, char[] oldValue, char[] newValue) {
 	
 	float iNewValue = StringToFloat(newValue);
 
-	if(convar == cVars[0])  {
-		SetConVarString(cVars[0], PLUGIN_VERSION);
-	}
-	else if(convar == cVars[1]) {
+	if(convar == cVars[1]) {
 		sMode = RoundFloat(iNewValue);
 	}
 	else if((convar == cVars[2]) || (convar == cVars[3])) {
@@ -296,41 +296,36 @@ public Action ForceBoss(int client, int args) {
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	if(g_AutoBoss == 0) {
-		gActiveTimer = true;
-		if(args == 1) {
-			saveIndex = gIndex;
-			char arg1[32];
-			char sName[64];
-			GetCmdArg(1, arg1, sizeof(arg1));
-			int i;
-			for(i = 0; i < gArray.Length; i++) {
-				StringMap HashMap = gArray.Get(i);
-				HashMap.GetString("Name", sName, sizeof(sName));
-				if(StrEqual(sName, arg1, false)) {
-					gIndex = i;
-					break;
-				}
+	gActiveTimer = true;
+	if(args == 1) {
+		saveIndex = gIndex;
+		char arg1[32];
+		char sName[64];
+		GetCmdArg(1, arg1, sizeof(arg1));
+		int i;
+		for(i = 0; i < gArray.Length; i++) {
+			StringMap HashMap = gArray.Get(i);
+			HashMap.GetString("Name", sName, sizeof(sName));
+			if(StrEqual(sName, arg1, false)) {
+				gIndex = i;
+				break;
 			}
-			if(i == gArray.Length) {
-				CReplyToCommand(client, "{frozen}[Boss] {red}Error: {orange}Boss does not exist.");
-				return Plugin_Handled;
-			}
-			ClearTimer(cTimer);
-			argIndex = 1;
-			CreateBoss(gIndex, gPos, -1, -1, -1.0, -1, false);
 		}
-		else if(args == 0) {
-			argIndex = 0;
-			ClearTimer(cTimer);
-			SpawnBoss(-1,-1.0,-1);
+		if(i == gArray.Length) {
+			CReplyToCommand(client, "{frozen}[Boss] {red}Error: {orange}Boss does not exist.");
+			return Plugin_Handled;
 		}
-		else {
-			CReplyToCommand(client, "{frozen}[Boss] {red}Format: {orange}!forceboss <bossname>");
-		}
+		ClearTimer(cTimer);
+		argIndex = 1;
+		CreateBoss(gIndex, gPos, -1, -1, -1.0, -1, false);
+	}
+	else if(args == 0) {
+		argIndex = 0;
+		ClearTimer(cTimer);
+		SpawnBoss(-1,-1.0,-1);
 	}
 	else {
-		CReplyToCommand(client, "%t", "Boss_Active");
+		CReplyToCommand(client, "{frozen}[Boss] {red}Format: {orange}!forceboss <bossname>");
 	}
 	return Plugin_Handled;
 }
@@ -1015,7 +1010,7 @@ public void OnEntityDestroyed(int ent) {
 				if(!StrEqual(sDSound, "none", false)) {
 					EmitSoundToAll(sDSound, _, _, _, _, 1.0);
 				}
-				if(timed && GetClientCount(true) >= sMin) {
+				if(timed && GetClientCount(true) >= sMin && g_AutoBoss == 0) {
 					HUDTimer();
 					CPrintToChatAll("%t", "Time", RoundFloat(sInterval));
 				}
