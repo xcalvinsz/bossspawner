@@ -12,43 +12,11 @@
  *	If you have paid for this plugin, get your money back.
  *	
 Version Log:
-v.4.4.2 -
-	Fixed crashing problem with convar changing version number
-	Removed !forceboss restriction to 1 boss, you can now spawn multiple bosses with that command
-v.4.4.1 -
-	Fixed a bug where bosses that die normally then trying to use the command !fb would say boss is already spawned
-	Fixed a bug where manual spawned bosses would get killed on on player disconnecting
-	Bosses will no longer get force removed by plugin when players disconnect below the treshold: sm_boss_minplayers (only timers will stop)
-	Fixed sm_boss_minplayer if statements not working properly due to improper int/float comparison
-	Changed OnClientDisconnect to OnClientDisconenct_Post to fix client count which was off by 1
-	SDKUnhook on client disconnect post
-v.4.4  -
-Added -
-	Added Cvar:sm_healthbar_type to change healthbar display type: 0-off 1-hudbar 2-hudtext 3-both
-Changes -
-	Changed the way data is stored, now uses arraylists and datapacks instead of saving in entity itself
-	Changed more code into object-oriented
-	Changed !sb and !spawnboss, can now be used while spectating (Note: Boss will spawn directly on player that you are spectating)
-	Changes !slayboss command will now only reply back to player and not to all players
-Removed -
-	Removed command:sm_reloadbossconfig, just reload plugin which is better to do
-	Blocks the message "player has killed horseman/merasmus/monoculus" when boss dies
-Fixes -
-	Fixed a bug when slaying a boss then spawning another would say the boss is still active
-	Fixed a bug where all info_target entities were getting removed by this plugin causing some map functions to break
-	Fixed a big where console would say spawn_boss_alt not found: was a typo and changed to spawn_loot_alt
-	Fixed a bug where DeathSound key would not play properly on multiple boss spawns: now uses datapacks as references
-	Fixed a bug where healthbar would not work properly on multiple bosses
-	Improved healthbar carry over to another boss when one of them dies
-	Fixed a bug where healthbar would show negative values when dying
-	Fixed a bug where health/scale/size/glow was not working properly even though it was defined in .cfg file
-	Fixed a bug with players disconnecting would cause auto-spawned bosses to break
-	Fixed a bug with hitbox not scaling properly (Note: Some models do not scale 1:1 with the hitboxes)
-	Fixed a memory leak on data timers
-Others -
-	Fixed some small typos in code
-	Cleaned up useless comments
-	
+v.5.0
+	- Fixed bug where auto-spawning bosses would stop after the first boss dies (not done)
+	- Fixed small bug where chat would print that a boss is going to spawn even though it shouldn't (not done)
+	- Updated timers syntax (not done)
+	- Added voting (half done)
 	
 Known Issues:
 	- When tf_skeleton with a hat attacks you while standing still, his hat model may freeze until he starts moving
@@ -56,6 +24,9 @@ Known Issues:
 	- Hat size and offset does not change if player manually spawns a boss with a different size from the config (e.g !horseman 1000 5 1 : Horseman size is 5 but default size in boss config is 1, if this boss has a hat the hat won't resize)
  *	============================================================================
  */
+ /*speed tf_halloween_bot_speed
+ tf_monoculus_speed*
+ tf_eyeball_boss_speed*/
 #pragma semicolon 1
 #include <morecolors>
 #include <sdktools>
@@ -78,8 +49,8 @@ ArrayList gArray = null;
 ArrayList gData = null;
 
 //Variables for ConVars conversion
-int sMode, sHealthBar, sMin;
-float sInterval, sHUDx, sHUDy;
+int sMode, sHealthBar, sMin, sInterval;
+float sHUDx, sHUDy;
 bool gEnabled;
 
 //Other variables
@@ -101,7 +72,7 @@ public Plugin myinfo =  {
 
 public void OnPluginStart() {
 	cVars[0] = CreateConVar("sm_boss_version", 		PLUGIN_VERSION, "Custom Boss Spawner Version", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
-	cVars[1] = CreateConVar("sm_boss_mode", 		"1", 			"Spawn mode for auto-spawning [0:Random | 1:Ordered]");
+	cVars[1] = CreateConVar("sm_boss_mode", 		"2", 			"Spawn mode for auto-spawning [0:Random | 1:Ordered | 2:Vote]");
 	cVars[2] = CreateConVar("sm_boss_interval", 	"300", 			"How many seconds until the next boss spawns?");
 	cVars[3] = CreateConVar("sm_boss_minplayers", 	"12", 			"How many players are needed before enabling auto-spawning?");
 	cVars[4] = CreateConVar("sm_boss_hud_x", 		"0.05", 		"X-Coordinate of the HUD display.");
@@ -132,15 +103,15 @@ public void OnPluginStart() {
 	
 	gArray = new ArrayList();
 	gData = new ArrayList();
-	CreateTimer(0.5, HealthTimer, _);
+	CreateTimer(0.5, HealthTimer, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
 
 	LoadTranslations("common.phrases");
 	LoadTranslations("bossspawner.phrases");
-	AutoExecConfig(false, "bossspawner");
+	AutoExecConfig(false, "bossspawner");  
 }
 
 public void OnPluginEnd() {
-	ClearTimer(cTimer);
+	//ClearTimer(cTimer);
 	RemoveExistingBoss();
 	//reset flags for cheat cmds lifetime
 	int flags = GetCommandFlags("tf_eyeball_boss_lifetime");
@@ -151,7 +122,7 @@ public void OnPluginEnd() {
 
 public void OnConfigsExecuted() {
 	sMode 		= 	GetConVarInt(cVars[1]);
-	sInterval 	= 	GetConVarFloat(cVars[2]);
+	sInterval 	= 	GetConVarInt(cVars[2]);
 	sMin		= 	GetConVarInt(cVars[3]);
 	sHUDx 		= 	GetConVarFloat(cVars[4]);
 	sHUDy 		= 	GetConVarFloat(cVars[5]);
@@ -194,7 +165,6 @@ public void OnClientPostAdminCheck(int client) {
 public void OnClientDisconnect_Post(int client) {
 	if(GetClientCount(true) < sMin) {
 		ClearTimer(cTimer);
-		//RemoveExistingBoss();
 	}
 	SDKUnhook(client, SDKHook_OnTakeDamage, OnClientDamaged);
 }
@@ -209,8 +179,10 @@ public void cVarChange(Handle convar, char[] oldValue, char[] newValue) {
 		sMode = RoundFloat(iNewValue);
 	}
 	else if((convar == cVars[2]) || (convar == cVars[3])) {
-		if(convar == cVars[2]) sInterval = iNewValue;
-		else sMin = RoundFloat(iNewValue);
+		if(convar == cVars[2]) 
+			sInterval = RoundFloat(iNewValue);
+		else
+			sMin = RoundFloat(iNewValue);
 		
 		if(GetClientCount(true) >= sMin) {
 			if(g_AutoBoss == 0) {
@@ -219,7 +191,6 @@ public void cVarChange(Handle convar, char[] oldValue, char[] newValue) {
 		}
 		else {
 			ClearTimer(cTimer);
-			//RemoveExistingBoss();
 		}
 	}
 	else if(convar == cVars[4]) {
@@ -322,7 +293,7 @@ public Action ForceBoss(int client, int args) {
 	else if(args == 0) {
 		argIndex = 0;
 		ClearTimer(cTimer);
-		SpawnBoss(-1,-1.0,-1);
+		SpawnBoss();
 	}
 	else {
 		CReplyToCommand(client, "{frozen}[Boss] {red}Format: {orange}!forceboss <bossname>");
@@ -615,18 +586,67 @@ public bool TraceentFilterPlayer(int ent, int contentsMask) {
 /* ---------------------------------COMMAND FUNCTION----------------------------------*/
 
 /* --------------------------------BOSS SPAWNING CORE---------------------------------*/
-void SpawnBoss(int iBaseHP, float iSize, int iGlow) {
-	int iScaleHP = -1;
-	if(iBaseHP != -1) {
-		iScaleHP = 0;
-	}
+void SpawnBoss() {
 	gActiveTimer = true;
-	if(sMode == 0) {
-		gIndex = GetRandomInt(0, gArray.Length-1);
-		CreateBoss(gIndex, gPos, iBaseHP, iScaleHP, iSize, iGlow, false);
+	switch(sMode) {
+		case 0: {
+			gIndex = GetRandomInt(0, gArray.Length-1);
+			CreateBoss(gIndex, gPos, -1, -1, -1.0, -1, false);
+		}
+		case 1: {
+			CreateBoss(gIndex, gPos, -1, -1, -1.0, -1, false);
+		}
+		case 2: {
+			CreateVote(gPos);
+		}
 	}
-	else if(sMode == 1) {
-		CreateBoss(gIndex, gPos, iBaseHP, iScaleHP, iSize, iGlow, false);
+}
+
+public void CreateVote(float kpos[3]) {
+	if (IsVoteInProgress())
+		return;
+	//create a random list to push random bosses
+	ArrayList randomList = new ArrayList();
+	//then clone the original array so we don't mess with the original
+	ArrayList copyList = gArray.Clone();
+	//we loop through the copy list and get a random hash and push it to the random list then erase the index from copylist
+	while(copyList.Length != 0) {
+		int rand = GetRandomInt(0, copyList.Length-1);
+		randomList.Push(copyList.Get(rand));
+		copyList.Erase(rand);
+	}
+	char iData[64], sName[64];
+	Menu menu = new Menu(Handle_VoteMenu);
+	for(int i = 0; i < randomList.Length; i++) {
+		StringMap HashMap = randomList.Get(i);
+		HashMap.GetString("Name", sName, sizeof(sName));
+		int index = gArray.FindValue(HashMap);
+		Format(iData, sizeof(iData), "%d %f %f %f", index, kpos[0], kpos[1], kpos[2]);
+		menu.SetTitle("Vote for the next boss!");
+		menu.AddItem(iData, sName);
+	}
+	menu.ExitButton = false;
+	menu.DisplayVoteToAll(20);
+	delete randomList;
+	delete copyList;
+}
+
+public int Handle_VoteMenu(Menu menu, MenuAction action, int param1, int param2) {
+	if(action == MenuAction_End) {
+		delete menu;
+	} 
+	else if(action == MenuAction_VoteEnd) {
+		char iData[64];
+		menu.GetItem(param1, iData, sizeof(iData));
+		PrintToChatAll("%s", iData);
+		char stringData[4][16];
+		ExplodeString(iData, " ", stringData, sizeof(stringData), sizeof(stringData[]));
+		int index = StringToInt(stringData[0]);
+		float kpos[3];
+		kpos[0] = StringToFloat(stringData[1]);
+		kpos[1] = StringToFloat(stringData[2]);
+		kpos[2] = StringToFloat(stringData[3]);
+		CreateBoss(index, kpos, -1, -1, -1.0, -1, false);
 	}
 }
 
@@ -819,7 +839,6 @@ public Action RemoveTimerPrint(Handle hTimer, DataPack hPack) {
 //Instead of hooking to sdkhook_takedamage, we use a 0.5 timer because of hud overloading when taking damage
 public Action HealthTimer(Handle hTimer, any ref) {
 	if(sHealthBar == 0 || sHealthBar == 1) {
-		CreateTimer(0.5, HealthTimer, _);
 		return Plugin_Continue;
 	}
 	if(gTrack != -1 && IsValidEntity(gTrack)) {
@@ -836,7 +855,6 @@ public Action HealthTimer(Handle hTimer, any ref) {
 			}
 		}
 	}
-	CreateTimer(0.5, HealthTimer, _);
 	return Plugin_Continue;
 }
 
@@ -898,7 +916,7 @@ void ResizeHitbox(int entity, float fScale) {
 /* ---------------------------------TIMER & HUD CORE----------------------------------*/
 public void HUDTimer() {
 	if(!gEnabled) return;
-	sInterval = GetConVarFloat(cVars[2]);
+	sInterval = GetConVarInt(cVars[2]);		//eh lazy
 	cTimer = CreateTimer(1.0, HUDCountDown, _, TIMER_REPEAT);
 }
 
@@ -906,11 +924,11 @@ public Action HUDCountDown(Handle hTimer) {
 	for(int i = 1; i <= MaxClients; i++) {
 		if(IsClientInGame(i)) {
 			SetHudTextParams(sHUDx, sHUDy, 1.0, 255, 255, 255, 255);
-			ShowHudText(i, -1, "Boss: %d seconds", RoundFloat(sInterval));
+			ShowHudText(i, -1, "Boss: %d seconds", sInterval);
 		}
 	}
 	if(sInterval <= 0) {
-		SpawnBoss(-1,-1.0,-1);
+		SpawnBoss();
 		cTimer = null;
 		return Plugin_Stop;
 	}
@@ -919,7 +937,7 @@ public Action HUDCountDown(Handle hTimer) {
 }
 
 void ResetTimer() {
-	CPrintToChatAll("%t", "Time", RoundFloat(sInterval));
+	CPrintToChatAll("%t", "Time", sInterval);
 	ClearTimer(cTimer);
 	HUDTimer();
 }
@@ -1011,8 +1029,8 @@ public void OnEntityDestroyed(int ent) {
 					EmitSoundToAll(sDSound, _, _, _, _, 1.0);
 				}
 				if(timed && GetClientCount(true) >= sMin && g_AutoBoss == 0) {
-					HUDTimer();
-					CPrintToChatAll("%t", "Time", RoundFloat(sInterval));
+					CPrintToChatAll("%t", "Time", sInterval);
+					ResetTimer();
 				}
 				delete dMax;
 			}
@@ -1226,7 +1244,7 @@ public void SetupMapConfigs(const char[] sFile) {
 		gEnabled = true;
 		if(GetClientCount(true) >= sMin) {
 			HUDTimer();
-			CPrintToChatAll("%t", "Time", RoundFloat(sInterval));
+			CPrintToChatAll("%t", "Time", sInterval);
 		}
 	}
 	else if(mapEnabled == 0) {
@@ -1368,8 +1386,6 @@ public void SetupDownloads(const char[] sFile) {
 		i = FindCharInString(buffer, '\n', true);
 		if(i != -1) buffer[i] = '\0';
 		TrimString(buffer);
-		//Format(buffer, sizeof(buffer), "%s\\", buffer);
-		//PrintToServer("%s", buffer);
 		if(!DirExists(buffer)) {
 			LogError("[Boss] Error: '%s' directory can not be found.", buffer);
 			SetFailState("[Boss] Error: '%s' directory can not be found.", buffer);
