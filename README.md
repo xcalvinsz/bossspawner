@@ -1,4 +1,4 @@
-# bossspawner
+# Bossspawner
 
 This plugin runs on Sourcemod for the game Team Fortress 2
 
@@ -28,3 +28,6 @@ This plugin allows you to set the custom bosses:
 - PosFix
 - IntroSound
 - DeathSound
+
+More info on how to set up properly can be found here:
+https://forums.alliedmods.net/showthread.php?p=1968904
