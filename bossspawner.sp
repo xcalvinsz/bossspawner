@@ -3,7 +3,7 @@
  *	
  *	[TF2] Custom Boss Spawner
  *	Alliedmodders: https://forums.alliedmods.net/showthread.php?t=218119
- *	Current Version: 4.5
+ *	Current Version: 5.0
  *
  *	Written by Tak (Chaosxk)
  *	https://forums.alliedmods.net/member.php?u=87026
@@ -12,6 +12,40 @@
  *	If you have paid for this plugin, get your money back.
  *	
 Version Log:
+v.5.0
+	- Fixed custom models causing bosses to stop moving and attacking (Uses bonemerge)
+	- Glow colors can be changed through spawn menu or through bossspawner_boss.cfg (spawn menu will override the config) or through command
+			Spawn menu - colored glows (Red Green Blue Yellow Purple Cyan Orange Pink Black)
+			Config - colored glows from RGB - Alpha values("0-255 0-255 0-255 0-255")(E.G "255 0 0 255" will make Red, "0 255 0 255" will make Green, "0 0 255 255" will make Blue)
+			Command - colored glows from RGB - !<bossname> <health> <size> <R,G,B,A> where RGBA values vary from 0-255, Example: !horseman 1000 1 255,0,255,255 (horseman will spawn with 1000 hp with purple glow)
+	- Changed sm_boss_vote as a percentage between 0-100 instead of amount of players
+	- May have fixed a call stack trace error on OnEntityDestroyed()
+	- Updated bossspawner_boss.cfg - Added colors and modified King and Warhammer "PosFix" values from 300 to 5 so it doesn't spawn way over than it should
+
+New default bosses: (Bosses that do not require any model/material downloads)
+	- Demobot
+	- Heavybot
+	- Pyrobot
+	- Scoutbot
+	- Soldierbot
+	- Spybot
+	- Sniperbot
+	- Medicbot
+	- Engineerbot
+	- Tank
+	- Ghost
+	- Sentrybuster
+	- Botkiller
+
+Known bugs: 
+	- Horseman axe will NOT glow
+	- Merasmus will tend to randomly change color from green to normal
+	- Monoculus can no longer have model replacement due to some complications
+	- Botkiller and Ghost can not be resized
+	- When tf_skeleton with a hat attacks you while standing still, his hat model may freeze until he starts moving
+	- eyeball_boss can die from collision from a payload cart, most of time in air so it doesn't matter too much
+	- Hat size and offset does not change if player manually spawns a boss with a different size from the config (e.g !horseman 1000 5 1 : Horseman size is 5 but default size in boss config is 1, if this boss has a hat the hat won't resize)
+	
 v.4.5 BETA
 	- Fixed bug where auto-spawning bosses would stop after the first boss dies
 	- Updated timers syntax 
@@ -21,11 +55,6 @@ v.4.5 BETA
 	- sm_voteboss is public command to start a boss vote, minimum votes needed is from sm_boss_vote
 	- Fixed some small bugs with ent-refs typos
 	- Fixed bug where !slayboss during boss countdown would stop timer
-	
-Known Issues:
-	- When tf_skeleton with a hat attacks you while standing still, his hat model may freeze until he starts moving
-	- eyeball_boss can die from collision from a payload cart, most of time in air so it doesn't matter too much
-	- Hat size and offset does not change if player manually spawns a boss with a different size from the config (e.g !horseman 1000 5 1 : Horseman size is 5 but default size in boss config is 1, if this boss has a hat the hat won't resize)
  *	============================================================================
  */
 #pragma semicolon 1
@@ -35,7 +64,7 @@ Known Issues:
 #include <sourcemod>
 #include <sdkhooks>
 
-#define PLUGIN_VERSION "4.5"
+#define PLUGIN_VERSION "5.0"
 #define INTRO_SND	"ui/halloween_boss_summoned_fx.wav"
 #define DEATH_SND	"ui/halloween_boss_defeated_fx.wav"
 #define HORSEMAN	"headless_hatman"
@@ -43,6 +72,12 @@ Known Issues:
 #define MERASMUS	"merasmus"
 #define SKELETON	"tf_zombie"
 #define SNULL 		""
+
+#define EF_NODRAW				(1 << 5)
+#define EF_BONEMERGE            (1 << 0)
+#define EF_NOSHADOW             (1 << 4)
+#define EF_BONEMERGE_FASTCULL   (1 << 7)
+#define EF_PARENT_ANIMATES      (1 << 9)
 
 ConVar cVars[8] = {null, ...};
 Handle cTimer = null;
@@ -69,20 +104,20 @@ int argIndex, saveIndex;
 public Plugin myinfo =  {
 	name = "[TF2] Custom Boss Spawner",
 	author = "Tak (chaosxk)",
-	description = "An advanced custom boss spawner.",
+	description = "A customizable boss spawner",
 	version = PLUGIN_VERSION,
 	url = "http://www.sourcemod.net"
 }
 
 public void OnPluginStart() {
-	cVars[0] = CreateConVar("sm_boss_version", 		PLUGIN_VERSION, "Custom Boss Spawner Version", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
+	cVars[0] = CreateConVar("sm_boss_version", 		PLUGIN_VERSION, "Custom Boss Spawner Version", FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
 	cVars[1] = CreateConVar("sm_boss_mode", 		"1", 			"Spawn mode for auto-spawning [0:Random | 1:Ordered | 2:Vote]");
 	cVars[2] = CreateConVar("sm_boss_interval", 	"300", 			"How many seconds until the next boss spawns?");
 	cVars[3] = CreateConVar("sm_boss_minplayers", 	"12", 			"How many players are needed before enabling auto-spawning?");
 	cVars[4] = CreateConVar("sm_boss_hud_x", 		"0.05", 		"X-Coordinate of the HUD display.");
 	cVars[5] = CreateConVar("sm_boss_hud_y", 		"0.05", 		"Y-Coordinate of the HUD display");
 	cVars[6] = CreateConVar("sm_healthbar_type", 	"3", 			"What kind of healthbar to display? [0:None | 1:HUDBar | 2:HUDText | 3:Both]");
-	cVars[7] = CreateConVar("sm_boss_vote", 		"5", 			"How many people who does !voteboss before a vote starts to spawn a boss?");
+	cVars[7] = CreateConVar("sm_boss_vote", 		"50", 			"How many people are needed to type !voteboss before a vote starts to spawn a boss? [0-100] as percentage");
 	
 	RegAdminCmd("sm_getcoords", 		GetCoords, 		ADMFLAG_GENERIC, "Get the Coordinates of your cursor.");
 	RegAdminCmd("sm_forceboss", 		ForceBoss, 		ADMFLAG_GENERIC, "Forces a auto-spawning boss to spawn early.");
@@ -294,7 +329,8 @@ public Action VoteBoss(int client, int args) {
 			if(gVotes[i])
 				total++;
 		}
-		if(total == gMinVotes) {
+		int percentage = (total / GetClientCount(true) * 100);
+		if(percentage >= gMinVotes) {
 			for(int i = 0; i < MaxClients; i++) {
 				gVotes[i] = 0;
 			}
@@ -304,7 +340,7 @@ public Action VoteBoss(int client, int args) {
 		else {
 			char name[32];
 			GetClientName(client, name, sizeof(name));
-			CPrintToChatAll("{frozen}[Boss] {orange}%s has casted a vote, %d vote is needed to start a vote for next boss. Type !voteboss to cast yours!", name, gMinVotes-total);
+			CPrintToChatAll("{frozen}[Boss] {orange}%s has casted a vote! %d%% out of %d%% is needed to start a vote!", name, percentage, gMinVotes);
 		}
 	}
 	else {
@@ -340,7 +376,8 @@ public Action ForceBoss(int client, int args) {
 		//ClearTimer(cTimer);
 		delete cTimer;
 		argIndex = 1;
-		CreateBoss(gIndex, gPos, -1, -1, -1.0, -1, false);
+		char sGlow[32];
+		CreateBoss(gIndex, gPos, -1, -1, -1.0, sGlow, false);
 	}
 	else if(args == 0) {
 		argIndex = 0;
@@ -430,21 +467,30 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 		return Plugin_Handled;
 	}
 	kPos[2] -= 10.0;
-	int iBaseHP = -1, iScaleHP = -1, iGlow = -1;
+	int iBaseHP = -1, iScaleHP = -1;
+	char sGlow[32];
 	float iSize = -1.0;
-	if(args > 1) {
-		iBaseHP = StringToInt(arg[1]);
-		iScaleHP = 0;
+	if(args < 1 || args > 4) {
+		CPrintToChat(client, "{Frozen}[Boss] {orange}Incorrect parameters: !<bossname> <health> <optional:size> <optional:RGBA values for color>");
+		CPrintToChat(client, "{Frozen}[Boss] {orange}Example usage: !horseman 1000 2 255,255,255,255");
+		return Plugin_Handled;
 	}
-	if(args > 2) {
-		iSize = StringToFloat(arg[2]);
-	}
-	if(args > 3) {
-		iGlow = StringToInt(arg[3]);
+	else {
+		if(args > 1) {
+			iBaseHP = StringToInt(arg[1]);
+			iScaleHP = 0;
+		}
+		if(args > 2) {
+			iSize = StringToFloat(arg[2]);
+		}
+		if(args > 3) {
+			Format(sGlow, sizeof(sGlow), "%s", arg[3]);
+			ReplaceString(sGlow, sizeof(sGlow), ",", " ", false);
+		}
 	}
 	gIndexCmd = i;
 	gActiveTimer = false;
-	CreateBoss(gIndexCmd, kPos, iBaseHP, iScaleHP, iSize, iGlow, true);
+	CreateBoss(gIndexCmd, kPos, iBaseHP, iScaleHP, iSize, sGlow, true);
 	return Plugin_Handled;
 }
 
@@ -484,24 +530,34 @@ public Action SpawnBossCommand(int client, const char[] command, int args) {
 		return Plugin_Handled;
 	}
 	kPos[2] -= 10.0;
-	int iBaseHP = -1, iScaleHP = -1, iGlow = -1;
+	int iBaseHP = -1, iScaleHP = -1;
+	char sGlow[32];
 	float iSize = -1.0;
-	if(args > 0) {
-		GetCmdArg(1, arg1, sizeof(arg1));
-		iBaseHP = StringToInt(arg1);
-		iScaleHP = 0;
+	
+	if(args < 0 || args > 3) {
+		CPrintToChat(client, "{Frozen}[Boss] {orange}Incorrect parameters: !<bossname> <health> <optional:size> <optional:RGBA values for color>");
+		CPrintToChat(client, "{Frozen}[Boss] {orange}Example usage: !horseman 1000 2 255,255,255,255");
+		return Plugin_Handled;
 	}
-	if(args > 1) {
-		GetCmdArg(2, arg2, sizeof(arg2));
-		iSize = StringToFloat(arg2);
-	}
-	if(args > 2) {
-		GetCmdArg(3, arg3, sizeof(arg3));
-		iGlow = StringToInt(arg3);
+	else {
+		if(args > 0) {
+			GetCmdArg(1, arg1, sizeof(arg1));
+			iBaseHP = StringToInt(arg1);
+			iScaleHP = 0;
+		}
+		if(args > 1) {
+			GetCmdArg(2, arg2, sizeof(arg2));
+			iSize = StringToFloat(arg2);
+		}
+		if(args > 2) {
+			GetCmdArg(3, arg3, sizeof(arg3));
+			Format(sGlow, sizeof(sGlow), "%s", arg3);
+			ReplaceString(sGlow, sizeof(sGlow), ",", " ", false);
+		}
 	}
 	gIndexCmd = i;
 	gActiveTimer = false;
-	CreateBoss(gIndexCmd, kPos, iBaseHP, iScaleHP, iSize, iGlow, true);
+	CreateBoss(gIndexCmd, kPos, iBaseHP, iScaleHP, iSize, sGlow, true);
 	return Plugin_Handled;
 }
 
@@ -582,10 +638,23 @@ public int DisplayGlow(Menu MenuHandle, MenuAction action, int client, int num) 
 		Menu menu = new Menu(EndMenu);
 		menu.SetTitle("Boss Glow");
 		char param[32];
-		Format(param, sizeof(param), "%s 1", info);
-		menu.AddItem(param, "On");
-		Format(param, sizeof(param), "%s 0", info);
-		menu.AddItem(param, "Off");
+		
+		Format(param, sizeof(param), "%s 255,0,0,255", info);
+		menu.AddItem(param, "Red");
+		Format(param, sizeof(param), "%s 0,255,0,255", info);
+		menu.AddItem(param, "Green");
+		Format(param, sizeof(param), "%s 0,0,255,255", info);
+		menu.AddItem(param, "Blue");
+		Format(param, sizeof(param), "%s 255,255,0,255", info);
+		menu.AddItem(param, "Yellow");
+		Format(param, sizeof(param), "%s 255,0,255,255", info);
+		menu.AddItem(param, "Purple");
+		Format(param, sizeof(param), "%s 0,255,255,255", info);
+		menu.AddItem(param, "Cyan");
+
+		Format(param, sizeof(param), "%s 0,0,0,0", info);
+		menu.AddItem(param, "None");
+			
 		menu.ExitButton = true;
 		menu.Display(client, MENU_TIME_FOREVER);
 	}
@@ -600,19 +669,19 @@ public int EndMenu(Menu MenuHandle, MenuAction action, int client, int num) {
 		MenuHandle.GetItem(num, info, sizeof(info));
 		char sAttribute[4][16];
 		ExplodeString(info, " ", sAttribute, sizeof(sAttribute), sizeof(sAttribute[]));
-		int iIndex, iBaseHP, iGlow;
+		int iIndex, iBaseHP;
 		float iSize;
 		iIndex = StringToInt(sAttribute[0]);
 		iBaseHP = StringToInt(sAttribute[1]);
 		iSize = StringToFloat(sAttribute[2]);
-		iGlow = StringToInt(sAttribute[3]);
+		ReplaceString(sAttribute[3], sizeof(sAttribute[]), ",", " ", false);
 		if(!SetTeleportEndPoint(client)) {
 			CReplyToCommand(client, "{Frozen}[Boss] {orange}Could not find spawn point.");
 			return;
 		}
 		kPos[2] -= 10.0;
 		gActiveTimer = false;
-		CreateBoss(iIndex, kPos, iBaseHP, 0, iSize, iGlow, true);
+		CreateBoss(iIndex, kPos, iBaseHP, 0, iSize, sAttribute[3], true);
 	}
 	else if(action == MenuAction_End) {
 		delete MenuHandle;
@@ -653,13 +722,14 @@ public bool TraceentFilterPlayer(int ent, int contentsMask) {
 /* --------------------------------BOSS SPAWNING CORE---------------------------------*/
 void SpawnBoss() {
 	gActiveTimer = true;
+	char sGlow[32];
 	switch(sMode) {
 		case 0: {
 			gIndex = GetRandomInt(0, gArray.Length-1);
-			CreateBoss(gIndex, gPos, -1, -1, -1.0, -1, false);
+			CreateBoss(gIndex, gPos, -1, -1, -1.0, sGlow, false);
 		}
 		case 1: {
-			CreateBoss(gIndex, gPos, -1, -1, -1.0, -1, false);
+			CreateBoss(gIndex, gPos, -1, -1, -1.0, sGlow, false);
 		}
 		case 2: {
 			CreateVote();
@@ -705,16 +775,17 @@ public int Handle_VoteMenu(Menu menu, MenuAction action, int param1, int param2)
 		char iData[64];
 		menu.GetItem(param1, iData, sizeof(iData));
 		int index = StringToInt(iData);
-		CreateBoss(index, gPos, -1, -1, -1.0, -1, false);
+		char sGlow[32];
+		CreateBoss(index, gPos, -1, -1, -1.0, sGlow, false);
 	}
 }
 
-public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, float iSize, int iGlow, bool isCMD) {
+public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, float iSize, const char[] sGlowValue, bool isCMD) {
 	float temp[3];
 	for(int i = 0; i < 3; i++)
 		temp[i] = kpos[i];
 	
-	char sName[64], sModel[256], sType[32], sBase[16], sScale[16], sSize[16], sGlow[8], sPosFix[32];
+	char sName[64], sModel[256], sType[32], sBase[16], sScale[16], sSize[16], sGlow[32], sPosFix[32];
 	char sLifetime[32], sPosition[32], sHorde[8], sColor[16], sHModel[256], sISound[256], sHatPosFix[32], sHatSize[16];
 
 	StringMap HashMap = gArray.Get(index);
@@ -744,9 +815,10 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	if(iSize == -1.0) {
 		iSize = StringToFloat(sSize);
 	}
-	if(iGlow == -1) {
-		iGlow = StrEqual(sGlow, "Yes") ? 1 : 0;
-	}
+	/*if(!sGlowValue[0]) {
+		//empty string
+		Format(sGlowValue, sizeof(sGlowValue), "%s", sGlow);
+	}*/
 	if(strlen(sPosition) != 0 && !isCMD) {
 		char sPos[3][16];
 		ExplodeString(sPosition, ",", sPos, sizeof(sPos), sizeof(sPos[]));
@@ -771,8 +843,9 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		TeleportEntity(ent, temp, NULL_VECTOR, NULL_VECTOR);
 		DispatchSpawn(ent);
 		
+		ResizeHitbox(ent, iSize);
 		SetSize(iSize, ent);
-		SetGlow(iGlow, ent);
+		//SetGlow(iGlow, ent);
 		
 		SetEntProp		(ent, Prop_Data, "m_iHealth", 		sHealth);
 		SetEntProp		(ent, Prop_Data, "m_iMaxHealth", 	sHealth); 
@@ -781,16 +854,51 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		//speed don't work! -.-
 		//SetEntPropFloat	(ent, Prop_Data, "m_flSpeed", 	0.0);
 		
-		if(strlen(sColor) != 0) {
-			if(StrEqual(sColor, "Red", false)) SetEntProp(ent, Prop_Send, "m_nSkin", 0);
-			else if(StrEqual(sColor, "Blue", false)) SetEntProp(ent, Prop_Send, "m_nSkin", 1);
-			else if(StrEqual(sColor, "Green", false)) SetEntProp(ent, Prop_Send, "m_nSkin", 2);
-			else if(StrEqual(sColor, "Yellow", false)) SetEntProp(ent, Prop_Send, "m_nSkin", 3);
-			else if(StrEqual(sColor, "Random", false)) SetEntProp(ent, Prop_Send, "m_nSkin", GetRandomInt(0, 3));
-		}
+		//SetEntityModel(ent, sModel);
+		//Make the boss invisible and place a model over it to bonemerge
+		//Uses new glow entity tf_glow to change glow colors
+		SetEntProp(ent, Prop_Send, "m_fEffects", EF_NODRAW);
+		
+		int model = CreateEntityByName("prop_dynamic_override");
+		char targetname[128];
+		Format(targetname, sizeof(targetname), "%s%d", sName, GetRandomInt(2000, 10000));
+		
+		DispatchKeyValue(model, "targetname", targetname);
+		
 		if(strlen(sModel) != 0) {
-			SetEntityModel(ent, sModel);
+			DispatchKeyValue(model, "model", sModel);
 		}
+		else {
+			char mModel[256];
+			GetEntPropString(ent, Prop_Data, "m_ModelName", mModel, sizeof(mModel));
+			DispatchKeyValue(model, "model", mModel);
+		}
+		DispatchKeyValue(model, "solid", "0");
+		SetEntPropEnt(model, Prop_Send, "m_hOwnerEntity", ent);
+		SetEntProp(model, Prop_Send, "m_fEffects", EF_BONEMERGE|EF_NOSHADOW|EF_PARENT_ANIMATES);
+		
+		TeleportEntity(model, kpos, NULL_VECTOR, NULL_VECTOR);
+		DispatchSpawn(model);
+		
+		if(strlen(sColor) != 0) {
+			if(StrEqual(sColor, "Red", false)) SetEntProp(model, Prop_Send, "m_nSkin", 0);
+			else if(StrEqual(sColor, "Blue", false)) SetEntProp(model, Prop_Send, "m_nSkin", 1);
+			else if(StrEqual(sColor, "Green", false)) SetEntProp(model, Prop_Send, "m_nSkin", 2);
+			else if(StrEqual(sColor, "Yellow", false)) SetEntProp(model, Prop_Send, "m_nSkin", 3);
+			else if(StrEqual(sColor, "Random", false)) SetEntProp(model, Prop_Send, "m_nSkin", GetRandomInt(0, 3));
+		}
+		
+		SetVariantString("!activator");
+		AcceptEntityInput(model, "SetParent", ent, model, 0);
+		if(!StrEqual(sType, MONOCULUS)) {
+			SetVariantString("head"); 
+			AcceptEntityInput(model, "SetParentAttachment", ent, model, 0);
+		}
+		
+		if(!sGlowValue[0])
+			SetGlow(ent, targetname, kpos, sGlow);
+		else
+			SetGlow(ent, targetname, kpos, sGlowValue);
 		
 		if(gActiveTimer) 
 			g_AutoBoss++;
@@ -811,7 +919,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			DispatchKeyValue(hat, "model", sHModel);
 			DispatchKeyValue(hat, "spawnflags", "256");
 			DispatchKeyValue(hat, "solid", "0");
-			SetEntPropEnt(hat, Prop_Send, "m_hOwnerEntity", ent);
+			SetEntPropEnt(hat, Prop_Send, "m_hOwnerEntity", model);
 			//Hacky tacky way..
 			//SetEntPropFloat(hat, Prop_Send, "m_flModelScale", iSize > 5 ? (iSize > 10 ? (iSize/5+0.80) : (iSize/4+0.75)) : (iSize/3+0.66));
 			SetEntPropFloat(hat, Prop_Send, "m_flModelScale", StringToFloat(sHatSize));
@@ -819,14 +927,14 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			DispatchSpawn(hat);	
 			
 			SetVariantString("!activator");
-			AcceptEntityInput(hat, "SetParent", ent, hat, 0);
+			AcceptEntityInput(hat, "SetParent", model, hat, 0);
 			
 			//maintain the offset of hat to the center of head
 			if(!StrEqual(sType, MONOCULUS)) {
 				SetVariantString("head");
-				AcceptEntityInput(hat, "SetParentAttachment", ent, ent, 0);
+				AcceptEntityInput(hat, "SetParentAttachment", model, hat, 0);
 				SetVariantString("head");
-				AcceptEntityInput(hat, "SetParentAttachmentMaintainOffset", ent, ent, 0);
+				AcceptEntityInput(hat, "SetParentAttachmentMaintainOffset", model, hat, 0);
 			}
 			float hatpos[3];
 			hatpos[2] += StringToFloat(sHatPosFix);//*iSize; //-9.5*iSize
@@ -941,17 +1049,23 @@ void RemoveExistingBoss() {
 	}
 }
 
-void SetGlow(int value, int ent) {
-	if(IsValidEntity(ent)) {
-		SetEntProp(ent, Prop_Send, "m_bGlowEnabled", value);
-	}
+void SetSize(float value, int ent) {
+	SetEntPropFloat(ent, Prop_Send, "m_flModelScale", value);
 }
 
-void SetSize(float value, int ent) {
-	if(IsValidEntity(ent)) {
-		ResizeHitbox(ent, value);
-		SetEntPropFloat(ent, Prop_Send, "m_flModelScale", value);
-	}
+void SetGlow(int ent, const char[] targetname, float kpos[3], const char[] sGlowValue) {
+	int glow = CreateEntityByName("tf_glow");
+			
+	DispatchKeyValue(glow, "glowcolor", sGlowValue);
+	DispatchKeyValue(glow, "target", targetname);
+	SetEntPropEnt(glow, Prop_Send, "m_hOwnerEntity", ent);
+	TeleportEntity(glow, kpos, NULL_VECTOR, NULL_VECTOR);
+	DispatchSpawn(glow);
+	
+	SetVariantString("!activator");
+	AcceptEntityInput(glow, "SetParent", ent, glow, 0);
+	
+	AcceptEntityInput(glow, "Enable");
 }
 
 void ResizeHitbox(int entity, float fScale) {
@@ -1041,20 +1155,14 @@ public void OnEntityDestroyed(int ent) {
 	if(!IsValidEntity(ent)) return;
 	if(ent == gTrack) {
 		gTrack = -1;
-		char classname[128];
 		for(int i = 0; i < 2048; i++) {
 			if(!IsValidEntity(i)) 
 				continue;
-			GetEntityClassname(i, classname, sizeof(classname));
-			if(StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS)
-			|| StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON))
-			{
-				if(i == ent)
-					continue;
-				else {
-					gTrack = i;
-					break;
-				}
+			if(i == ent)
+				continue;
+			else {
+				gTrack = i;
+				break;
 			}
 		}
 		if(gTrack != -1) {
@@ -1177,8 +1285,8 @@ public void UpdateBossHealth(int ref) {
 	if(IsValidEntity(ent)) {
 		int HP = GetEntProp(ent, Prop_Data, "m_iHealth");
 		int maxHP = GetEntProp(ent, Prop_Data, "m_iMaxHealth");
-		int currentHP = RoundFloat(HP - maxHP * 0.9);
-		if(currentHP <= 0) {
+		float currentHP = HP - maxHP * 0.9;
+		if(currentHP <= 0.0) {
 			percentage = 0;
 			char classname[32];
 			GetEntityClassname(ent, classname, sizeof(classname));
@@ -1321,7 +1429,7 @@ public void SetupBossConfigs(const char[] sFile) {
 		SetFailState("[Boss] Could not read maps file: %s", sPath);
 	}
 	gArray.Clear();
-	char sName[64], sModel[256], sType[32], sBase[16], sScale[16], sWModel[256], sSize[16], sGlow[8], sPosFix[32];
+	char sName[64], sModel[256], sType[32], sBase[16], sScale[16], sWModel[256], sSize[16], sGlow[32], sPosFix[32];
 	char sLifetime[32], sPosition[32], sHorde[8], sColor[16], sISound[256], sDSound[256], sHModel[256], sGnome[8];
 	char sHatPosFix[32], sHatSize[16], sDamage[32];
 	do {
@@ -1332,7 +1440,7 @@ public void SetupBossConfigs(const char[] sFile) {
 		KvGetString(kv, "HP Scale", sScale, sizeof(sScale), "1000");
 		KvGetString(kv, "WeaponModel", sWModel, sizeof(sWModel), SNULL);
 		KvGetString(kv, "Size", sSize, sizeof(sSize), "1.0");
-		KvGetString(kv, "Glow", sGlow, sizeof(sGlow), "Yes");
+		KvGetString(kv, "Glow", sGlow, sizeof(sGlow), "0 0 0 0");
 		KvGetString(kv, "PosFix", sPosFix, sizeof(sPosFix), "0.0");
 		KvGetString(kv, "Lifetime", sLifetime, sizeof(sLifetime), "120");
 		KvGetString(kv, "Position", sPosition, sizeof(sPosition), SNULL);
@@ -1370,6 +1478,11 @@ public void SetupBossConfigs(const char[] sFile) {
 		}
 		if(StrEqual(sType, MONOCULUS)) {
 			RemoveBossLifeline("tf_eyeball_boss_lifetime", "tf_eyeball_boss_lifetime", StringToInt(sLifetime)+1);
+			if(strlen(sModel) != 0)
+			{
+				LogError("[Boss] Can not apply custom model to monoculus.");
+				SetFailState("[Boss] Can not apply custom model to monoculus.");
+			}
 		}
 		else if(StrEqual(sType, MERASMUS)) {
 			RemoveBossLifeline("tf_merasmus_lifetime", "tf_merasmus_lifetime", StringToInt(sLifetime)+1);
@@ -1471,5 +1584,3 @@ public void SetupDownloads(const char[] sFile) {
 	delete file;
 }
 /* ---------------------------------CONFIG MANAGEMENT---------------------------------*/
-
-/* ----------------------------------------END----------------------------------------*/

@@ -20,12 +20,12 @@ This plugin allows you to set the custom bosses:
 - Hat position
 - Damage
 - Size
-- Glow
+- Glow	("R G B A") which is between 0-255 that indicates the color of glow, "0 0 0 0" if off, "255 0 0 255" is red, "0 255 0 255" is green, "0 0 255 255" is blue and so on...google RGB values if you want other colors 
 - Position
 - Horde (For multi spawns)
-- Color
-- Gnome
-- PosFix
+- Color (Change color for the skeletons, CAN NOT HAVE CUSTOM MODEL OVER)
+- Gnome (Enable/Disable whether the gnomes from skeletons are spawned when the skeleton dies)
+- PosFix (Some custom models may make the boss spawn under, increase posfix to spawn it higher)
 - IntroSound
 - DeathSound
 
