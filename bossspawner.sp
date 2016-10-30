@@ -21,7 +21,9 @@ v.5.0
 	- Changed sm_boss_vote as a percentage between 0-100 instead of amount of players
 	- May have fixed a call stack trace error on OnEntityDestroyed()
 	- Updated bossspawner_boss.cfg - Added colors and modified King and Warhammer "PosFix" values from 300 to 5 so it doesn't spawn way over than it should
-
+	- Removed bossspawner_vanilla.cfg - No longer supporting
+	- Updated the README.txt file instructions to be clearer
+	
 New default bosses: (Bosses that do not require any model/material downloads)
 	- Demobot
 	- Heavybot
