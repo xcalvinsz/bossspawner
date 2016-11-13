@@ -3,7 +3,7 @@
  *	
  *	[TF2] Custom Boss Spawner
  *	Alliedmodders: https://forums.alliedmods.net/showthread.php?t=218119
- *	Current Version: 5.0
+ *	Current Version: 5.0.1
  *
  *	Written by Tak (Chaosxk)
  *	https://forums.alliedmods.net/member.php?u=87026
@@ -12,6 +12,8 @@
  *	If you have paid for this plugin, get your money back.
  *	
 Version Log:
+v.5.0.1
+	- Fixed HUD text and bar not disapearing when bosses die
 v.5.0
 	- Fixed custom models causing bosses to stop moving and attacking (Uses bonemerge)
 	- Glow colors can be changed through spawn menu or through bossspawner_boss.cfg (spawn menu will override the config) or through command
@@ -66,7 +68,7 @@ v.4.5 BETA
 #include <sourcemod>
 #include <sdkhooks>
 
-#define PLUGIN_VERSION "5.0"
+#define PLUGIN_VERSION "5.0.1"
 #define INTRO_SND	"ui/halloween_boss_summoned_fx.wav"
 #define DEATH_SND	"ui/halloween_boss_defeated_fx.wav"
 #define HORSEMAN	"headless_hatman"
@@ -1014,14 +1016,23 @@ public Action HealthTimer(Handle hTimer, any ref) {
 		int HP = GetEntProp(gTrack, Prop_Data, "m_iHealth");
 		int maxHP = GetEntProp(gTrack, Prop_Data, "m_iMaxHealth");
 		int currentHP = RoundFloat(HP - maxHP * 0.9);
-		if(currentHP > maxHP*0.1*0.65) SetHudTextParams(0.46, 0.12, 0.5, 0, 255, 0, 255);
-		else if(maxHP*0.1*0.25 < currentHP < maxHP*0.1*0.65) SetHudTextParams(0.46, 0.12, 0.5, 255, 255, 0, 255);
-		else SetHudTextParams(0.46, 0.12, 0.5, 255, 0, 0, 255);
-		if(currentHP < 0) currentHP = 0;
-		for(int i = 1; i <= MaxClients; i++) {
+		
+		if(currentHP > maxHP*0.1*0.65) 
+			SetHudTextParams(0.46, 0.12, 0.5, 0, 255, 0, 255);
+		else if(maxHP*0.1*0.25 < currentHP < maxHP*0.1*0.65) 
+			SetHudTextParams(0.46, 0.12, 0.5, 255, 255, 0, 255);
+		else 
+			SetHudTextParams(0.46, 0.12, 0.5, 255, 0, 0, 255);
+			
+		if(currentHP <= 0) 
+		{
+			SetHudTextParams(0.46, 0.12, 0.5, 0, 0, 0, 0);
+			currentHP = 0;
+		}
+		
+		for(int i = 1; i <= MaxClients; i++)
 			if(IsClientInGame(i)) {
 				ShowHudText(i, -1, "HP: %d", currentHP);
-			}
 		}
 	}
 	return Plugin_Continue;
@@ -1029,26 +1040,24 @@ public Action HealthTimer(Handle hTimer, any ref) {
 
 void RemoveExistingBoss() {
 	int ent = -1;
-	while((ent = FindEntityByClassname(ent, "headless_hatman")) != -1) {
-		if(IsValidEntity(ent)) {
+	
+	while((ent = FindEntityByClassname(ent, "headless_hatman")) != -1)
+		if(IsValidEntity(ent)) 
 			AcceptEntityInput(ent, "Kill");
-		}
-	}
-	while((ent = FindEntityByClassname(ent, "eyeball_boss")) != -1) {
-		if(IsValidEntity(ent)) {
+			
+	while((ent = FindEntityByClassname(ent, "eyeball_boss")) != -1)
+		if(IsValidEntity(ent))
 			AcceptEntityInput(ent, "Kill");
-		}
-	}
-	while((ent = FindEntityByClassname(ent, "merasmus")) != -1) {
-		if(IsValidEntity(ent)) {
+			
+	while((ent = FindEntityByClassname(ent, "merasmus")) != -1)
+		if(IsValidEntity(ent))
 			AcceptEntityInput(ent, "Kill");
-		}
-	}
-	while((ent = FindEntityByClassname(ent, "tf_zombie")) != -1) {
-		if(IsValidEntity(ent)) {
+			
+	while((ent = FindEntityByClassname(ent, "tf_zombie")) != -1)
+		if(IsValidEntity(ent))
 			AcceptEntityInput(ent, "Kill");
-		}
-	}
+			
+	SetEntProp(gHPbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
 }
 
 void SetSize(float value, int ent) {
@@ -1253,12 +1262,14 @@ void FindHealthBar() {
 }
 
 public Action OnBossDamaged(int victim, int &attacker, int &inflictor, float &damage, int &damagetype) {
-	UpdateBossHealth(EntIndexToEntRef(victim));
+	UpdateBossHealth(victim);
 }
 
 public Action OnClientDamaged(int victim, int &attacker, int &inflictor, float &damage, int &damagetype) {
-	if(!IsClientInGame(victim)) return Plugin_Continue;
-	if(!IsValidEntity(attacker)) return Plugin_Continue;
+	if(!IsClientInGame(victim)) 
+		return Plugin_Continue;
+	if(!IsValidEntity(attacker)) 
+		return Plugin_Continue;
 	char classname[32];
 	GetEntityClassname(attacker, classname, sizeof(classname));
 	if(StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) || StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON)) {
@@ -1278,51 +1289,55 @@ public Action OnClientDamaged(int victim, int &attacker, int &inflictor, float &
 	return Plugin_Continue;
 }
 
-public void UpdateBossHealth(int ref) {
-	if(gHPbar == -1 || sHealthBar == 0 || sHealthBar == 2) {
+public void UpdateBossHealth(int ent) 
+{
+	if(gHPbar == -1 || sHealthBar == 0 || sHealthBar == 2)
 		return;
-	}
+		
 	int percentage;
-	int ent = EntRefToEntIndex(ref);
-	if(IsValidEntity(ent)) {
+	if(IsValidEntity(ent)) 
+	{
 		int HP = GetEntProp(ent, Prop_Data, "m_iHealth");
 		int maxHP = GetEntProp(ent, Prop_Data, "m_iMaxHealth");
 		float currentHP = HP - maxHP * 0.9;
-		if(currentHP <= 0.0) {
+		if(currentHP <= 0.0) 
+		{
 			percentage = 0;
 			char classname[32];
 			GetEntityClassname(ent, classname, sizeof(classname));
-			if(StrEqual(classname, SKELETON)) {
-				for(int i = gData.Length-1; i >= 0; i--) {
+			if(StrEqual(classname, SKELETON))
+			{
+				for(int i = gData.Length-1; i >= 0; i--)
+				{
 					ArrayList dReference = gData.Get(i);
 					int dEnt = EntRefToEntIndex(dReference.Get(1));
-					if(ent == dEnt) {
+					if(ent == dEnt) 
+					{
 						int dIndex = dReference.Get(2);
 						char sGnome[8];
 						StringMap HashMap = gArray.Get(dIndex);
 						HashMap.GetString("Gnome", sGnome, sizeof(sGnome));
-						if(StringToInt(sGnome) == 0) {
+						if(StringToInt(sGnome) == 0)
 							AcceptEntityInput(ent, "kill");
-						}
+							
 						break;
 					}
 				}
 			}
-			else {
+			else
+			{
 				SetEntProp(ent, Prop_Data, "m_iHealth", 0);
 			
-				if(HP <= -1) {
+				if(HP <= -1)
 					SetEntProp(ent, Prop_Data, "m_takedamage", 0);
-				}
 			}
 		}
-		else {
+		else
 			percentage = RoundToCeil((float(HP) / float(maxHP / 10)) * 255.9);	//max 255.9 accurate at 100%
-		}
 	}
-	else {
+	else
 		percentage = 0;
-	}
+		
 	SetEntProp(gHPbar, Prop_Send, "m_iBossHealthPercentageByte", percentage);
 }
 
