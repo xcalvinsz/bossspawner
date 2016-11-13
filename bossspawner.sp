@@ -852,7 +852,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		SetEntProp		(ent, Prop_Data, "m_iHealth", 		sHealth);
 		SetEntProp		(ent, Prop_Data, "m_iMaxHealth", 	sHealth); 
 		SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		0);
-		SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		StrEqual(sType, MONOCULUS) ? 5 : 0);
+		SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		(strcmp(sType, MONOCULUS) == 0 || strcmp(sType, SKELETON) == 0) ? 5 : 0);
 		//speed don't work! -.-
 		//SetEntPropFloat	(ent, Prop_Data, "m_flSpeed", 	0.0);
 		
