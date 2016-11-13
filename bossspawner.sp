@@ -3,7 +3,7 @@
  *	
  *	[TF2] Custom Boss Spawner
  *	Alliedmodders: https://forums.alliedmods.net/showthread.php?t=218119
- *	Current Version: 5.0.1
+ *	Current Version: 5.0.2
  *
  *	Written by Tak (Chaosxk)
  *	https://forums.alliedmods.net/member.php?u=87026
@@ -12,6 +12,9 @@
  *	If you have paid for this plugin, get your money back.
  *	
 Version Log:
+v.5.0.2
+	- Fixed skeleton dispatching wrong blood color and spawning them on wrong team
+	- Added new glow colors to menu, orange, navy, pink, aquamarine, peachpuff, white
 v.5.0.1
 	- Fixed HUD text and bar not disapearing when bosses die
 v.5.0
@@ -49,16 +52,6 @@ Known bugs:
 	- When tf_skeleton with a hat attacks you while standing still, his hat model may freeze until he starts moving
 	- eyeball_boss can die from collision from a payload cart, most of time in air so it doesn't matter too much
 	- Hat size and offset does not change if player manually spawns a boss with a different size from the config (e.g !horseman 1000 5 1 : Horseman size is 5 but default size in boss config is 1, if this boss has a hat the hat won't resize)
-	
-v.4.5 BETA
-	- Fixed bug where auto-spawning bosses would stop after the first boss dies
-	- Updated timers syntax 
-	- Added voting
-	- sm_boss_vote determines min votes needed to start a boss vote
-	- sm_forcevote is an admin command to force start a vote for next boss
-	- sm_voteboss is public command to start a boss vote, minimum votes needed is from sm_boss_vote
-	- Fixed some small bugs with ent-refs typos
-	- Fixed bug where !slayboss during boss countdown would stop timer
  *	============================================================================
  */
 #pragma semicolon 1
@@ -68,7 +61,7 @@ v.4.5 BETA
 #include <sourcemod>
 #include <sdkhooks>
 
-#define PLUGIN_VERSION "5.0.1"
+#define PLUGIN_VERSION "5.0.2"
 #define INTRO_SND	"ui/halloween_boss_summoned_fx.wav"
 #define DEATH_SND	"ui/halloween_boss_defeated_fx.wav"
 #define HORSEMAN	"headless_hatman"
@@ -643,19 +636,30 @@ public int DisplayGlow(Menu MenuHandle, MenuAction action, int client, int num) 
 		menu.SetTitle("Boss Glow");
 		char param[32];
 		
-		Format(param, sizeof(param), "%s 255,0,0,255", info);
-		menu.AddItem(param, "Red");
 		Format(param, sizeof(param), "%s 0,255,0,255", info);
 		menu.AddItem(param, "Green");
-		Format(param, sizeof(param), "%s 0,0,255,255", info);
-		menu.AddItem(param, "Blue");
 		Format(param, sizeof(param), "%s 255,255,0,255", info);
 		menu.AddItem(param, "Yellow");
+		Format(param, sizeof(param), "%s 255,165,0,255", info);
+		menu.AddItem(param, "Orange");
+		Format(param, sizeof(param), "%s 255,0,0,255", info);
+		menu.AddItem(param, "Red");
+		Format(param, sizeof(param), "%s 0,0,128,255", info);
+		menu.AddItem(param, "Navy");
+		Format(param, sizeof(param), "%s 0,0,255,255", info);
+		menu.AddItem(param, "Blue");
 		Format(param, sizeof(param), "%s 255,0,255,255", info);
 		menu.AddItem(param, "Purple");
 		Format(param, sizeof(param), "%s 0,255,255,255", info);
 		menu.AddItem(param, "Cyan");
-
+		Format(param, sizeof(param), "%s 255,192,203,255", info);
+		menu.AddItem(param, "Pink");
+		Format(param, sizeof(param), "%s 127,255,212,255", info);
+		menu.AddItem(param, "Aquamarine");
+		Format(param, sizeof(param), "%s 255,218,185,255", info);
+		menu.AddItem(param, "Peachpuff");
+		Format(param, sizeof(param), "%s 255,255,255,255", info);
+		menu.AddItem(param, "White");
 		Format(param, sizeof(param), "%s 0,0,0,0", info);
 		menu.AddItem(param, "None");
 			
@@ -854,7 +858,8 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		SetEntProp		(ent, Prop_Data, "m_iHealth", 		sHealth);
 		SetEntProp		(ent, Prop_Data, "m_iMaxHealth", 	sHealth); 
 		SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		0);
-		SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		StrEqual(sType, MONOCULUS) ? 5 : 0);
+		//SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		StrEqual(sType, MONOCULUS) ? 5 : 0);
+		SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		(strcmp(sType, MONOCULUS) == 0 || strcmp(sType, SKELETON) == 0) ? 5 : 0);
 		//speed don't work! -.-
 		//SetEntPropFloat	(ent, Prop_Data, "m_flSpeed", 	0.0);
 		
