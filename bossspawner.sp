@@ -12,6 +12,10 @@
  *	If you have paid for this plugin, get your money back.
  *	
 Version Log:
+~ Next version
+	- Properly use FindConvar instead of ServerCommand to execute convars ("tf_eyeball_boss_lifetime" and "tf_merasmus_lifetime").
+	- Changed a bad attempt at managing convars ("tf_eyeball_boss_lifetime" and "tf_merasmus_lifetime"), plugin will now instead just set those values to 9999999 and default values when unloaded.
+
 v.5.0.2
 	- Fixed skeleton dispatching wrong blood color and spawning them on wrong team
 	- Added new glow colors to menu, orange, navy, pink, aquamarine, peachpuff, white
@@ -77,6 +81,7 @@ Known bugs:
 #define EF_PARENT_ANIMATES      (1 << 9)
 
 ConVar cVars[8] = {null, ...};
+ConVar g_cEyeball_Lifetime, g_cMerasmus_Lifetime;
 Handle cTimer = null;
 ArrayList gArray = null;
 ArrayList gData = null;
@@ -94,6 +99,7 @@ int g_AutoBoss, gTrack = -1, gHPbar = -1;
 int gMinVotes;
 
 int gVotes[MAXPLAYERS+1];
+int g_iEyeball_Default, g_iMerasmus_Default;
 
 //Index saving
 int argIndex, saveIndex;
@@ -143,21 +149,26 @@ public void OnPluginStart() {
 	
 	gArray = new ArrayList();
 	gData = new ArrayList();
+	
 	CreateTimer(0.5, HealthTimer, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
 
+	g_cEyeball_Lifetime = FindConVar("tf_eyeball_boss_lifetime");
+	g_cMerasmus_Lifetime = FindConVar("tf_merasmus_lifetime");
+	g_iEyeball_Default = g_cEyeball_Lifetime.IntValue;
+	g_iMerasmus_Default = g_cMerasmus_Lifetime.IntValue;
+	
 	LoadTranslations("common.phrases");
 	LoadTranslations("bossspawner.phrases");
+	
 	AutoExecConfig(false, "bossspawner");  
 }
 
-public void OnPluginEnd() {
-	//ClearTimer(cTimer);
+public void OnPluginEnd()
+{
+	//When plugin is unloaded, remove any bosses on map and set the monoculus/merasmus convars back to their default values
 	RemoveExistingBoss();
-	//reset flags for cheat cmds lifetime
-	int flags = GetCommandFlags("tf_eyeball_boss_lifetime");
-	SetCommandFlags("tf_eyeball_boss_lifetime", flags|FCVAR_CHEAT);
-	flags = GetCommandFlags("tf_merasmus_lifetime");
-	SetCommandFlags("tf_merasmus_lifetime", flags|FCVAR_CHEAT);
+	SetEyeballLifetime(g_iEyeball_Default);
+	SetMerasmusLifetime(g_iMerasmus_Default);
 }
 
 public void OnConfigsExecuted() {
@@ -181,13 +192,6 @@ public void OnConfigsExecuted() {
 			}
 		}
 	}
-}
-
-public void RemoveBossLifeline(const char[] command, const char[] execute, int duration) {
-	int flags = GetCommandFlags(command); 
-	SetCommandFlags(command, flags & ~FCVAR_CHEAT); 
-	ServerCommand("%s %d", execute, duration);
-	//SetCommandFlags(command, flags|FCVAR_CHEAT); 
 }
 
 public void OnMapEnd() {
@@ -1350,6 +1354,18 @@ public void UpdateBossHealth(int ent)
 
 /* ---------------------------------ENTITY MANAGEMENT---------------------------------*/
 
+/* ---------------------------------CALL FUNCTIONS------------------------------------*/
+void SetEyeballLifetime(int duration)
+{
+	g_cEyeball_Lifetime.SetInt(duration, false, false);
+}
+
+void SetMerasmusLifetime(int duration)
+{
+	g_cMerasmus_Lifetime.SetInt(duration, false, false);
+}
+/* ---------------------------------CALL FUNCTIONS------------------------------------*/
+
 /* ---------------------------------CONFIG MANAGEMENT---------------------------------*/
 public void SetupMapConfigs(const char[] sFile) {
 	char sPath[PLATFORM_MAX_PATH];
@@ -1501,7 +1517,7 @@ public void SetupBossConfigs(const char[] sFile) {
 			}
 		}
 		if(StrEqual(sType, MONOCULUS)) {
-			RemoveBossLifeline("tf_eyeball_boss_lifetime", "tf_eyeball_boss_lifetime", StringToInt(sLifetime)+1);
+			SetEyeballLifetime(9999999);
 			if(strlen(sModel) != 0)
 			{
 				LogError("[Boss] Can not apply custom model to monoculus.");
@@ -1509,7 +1525,7 @@ public void SetupBossConfigs(const char[] sFile) {
 			}
 		}
 		else if(StrEqual(sType, MERASMUS)) {
-			RemoveBossLifeline("tf_merasmus_lifetime", "tf_merasmus_lifetime", StringToInt(sLifetime)+1);
+			SetMerasmusLifetime(9999999);
 		}
 		if(!StrEqual(sType, HORSEMAN)) {
 			if(strlen(sWModel) != 0) {
