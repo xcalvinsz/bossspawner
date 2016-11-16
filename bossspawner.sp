@@ -15,6 +15,10 @@ Version Log:
 ~ Next version
 	- Properly use FindConvar instead of ServerCommand to execute convars ("tf_eyeball_boss_lifetime" and "tf_merasmus_lifetime").
 	- Changed a bad attempt at managing convars ("tf_eyeball_boss_lifetime" and "tf_merasmus_lifetime"), plugin will now instead just set those values to 9999999 and default values when unloaded.
+	- Updated some syntax and code clean up
+	- No longer caches values from convars (convars.IntValue is already cached)
+	- No longer need to unhook sdkhook on client disconnect
+	- General code cleanup
 
 v.5.0.2
 	- Fixed skeleton dispatching wrong blood color and spawning them on wrong team
@@ -80,15 +84,12 @@ Known bugs:
 #define EF_BONEMERGE_FASTCULL   (1 << 7)
 #define EF_PARENT_ANIMATES      (1 << 9)
 
-ConVar cVars[8] = {null, ...};
 ConVar g_cEyeball_Lifetime, g_cMerasmus_Lifetime;
 Handle cTimer = null;
 ArrayList gArray = null;
 ArrayList gData = null;
 
 //Variables for ConVars conversion
-int sMode, sHealthBar, sMin, sInterval;
-float sHUDx, sHUDy;
 bool gEnabled;
 
 //Other variables
@@ -96,7 +97,6 @@ int gIndex, gIndexCmd;
 float gPos[3], kPos[3];
 bool gActiveTimer;
 int g_AutoBoss, gTrack = -1, gHPbar = -1;
-int gMinVotes;
 
 int gVotes[MAXPLAYERS+1];
 int g_iEyeball_Default, g_iMerasmus_Default;
@@ -104,7 +104,11 @@ int g_iEyeball_Default, g_iMerasmus_Default;
 //Index saving
 int argIndex, saveIndex;
 
-public Plugin myinfo =  {
+ConVar g_cMode, g_cInterval, g_cMinplayers, g_cHudx, g_cHudy, g_cHealthbar, g_cVote;
+int g_iInterval;
+
+public Plugin myinfo = 
+{
 	name = "[TF2] Custom Boss Spawner",
 	author = "Tak (chaosxk)",
 	description = "A customizable boss spawner",
@@ -112,40 +116,39 @@ public Plugin myinfo =  {
 	url = "http://www.sourcemod.net"
 }
 
-public void OnPluginStart() {
-	cVars[0] = CreateConVar("sm_boss_version", 		PLUGIN_VERSION, "Custom Boss Spawner Version", FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
-	cVars[1] = CreateConVar("sm_boss_mode", 		"1", 			"Spawn mode for auto-spawning [0:Random | 1:Ordered | 2:Vote]");
-	cVars[2] = CreateConVar("sm_boss_interval", 	"300", 			"How many seconds until the next boss spawns?");
-	cVars[3] = CreateConVar("sm_boss_minplayers", 	"12", 			"How many players are needed before enabling auto-spawning?");
-	cVars[4] = CreateConVar("sm_boss_hud_x", 		"0.05", 		"X-Coordinate of the HUD display.");
-	cVars[5] = CreateConVar("sm_boss_hud_y", 		"0.05", 		"Y-Coordinate of the HUD display");
-	cVars[6] = CreateConVar("sm_healthbar_type", 	"3", 			"What kind of healthbar to display? [0:None | 1:HUDBar | 2:HUDText | 3:Both]");
-	cVars[7] = CreateConVar("sm_boss_vote", 		"50", 			"How many people are needed to type !voteboss before a vote starts to spawn a boss? [0-100] as percentage");
+public void OnPluginStart()
+{
+	CreateConVar("sm_boss_version", PLUGIN_VERSION, "Custom Boss Spawner Version", FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
 	
-	RegAdminCmd("sm_getcoords", 		GetCoords, 		ADMFLAG_GENERIC, "Get the Coordinates of your cursor.");
-	RegAdminCmd("sm_forceboss", 		ForceBoss, 		ADMFLAG_GENERIC, "Forces a auto-spawning boss to spawn early.");
-	RegAdminCmd("sm_fb", 				ForceBoss, 		ADMFLAG_GENERIC, "Forces a auto-spawning boss to spawn early.");
-	RegAdminCmd("sm_spawnboss", 		SpawnMenu, 		ADMFLAG_GENERIC, "Opens a menu to spawn a boss.");
-	RegAdminCmd("sm_sb", 				SpawnMenu, 		ADMFLAG_GENERIC, "Opens a menu to spawn a boss.");
-	RegAdminCmd("sm_slayboss", 			SlayBoss, 		ADMFLAG_GENERIC, "Slay all active bosses on map.");
-	RegAdminCmd("sm_forcevote", 		ForceVote, 		ADMFLAG_GENERIC, "Start a vote, this is the same as !forceboss if sm_boss_mode was set to 2");
+	g_cMode = 		CreateConVar("sm_boss_mode", 		"1", 	"Spawn mode for auto-spawning [0:Random | 1:Ordered | 2:Vote]");
+	g_cInterval = 	CreateConVar("sm_boss_interval", 	"300", 	"How many seconds until the next boss spawns?");
+	g_cMinplayers = CreateConVar("sm_boss_minplayers", 	"12", 	"How many players are needed before enabling auto-spawning?");
+	g_cHudx = 		CreateConVar("sm_boss_hud_x", 		"0.05", "X-Coordinate of the HUD display.");
+	g_cHudy = 		CreateConVar("sm_boss_hud_y", 		"0.05", "Y-Coordinate of the HUD display");
+	g_cHealthbar = 	CreateConVar("sm_healthbar_type", 	"3", 	"What kind of healthbar to display? [0:None | 1:HUDBar | 2:HUDText | 3:Both]");
+	g_cVote = 		CreateConVar("sm_boss_vote", 		"50", 	"How many people are needed to type !voteboss before a vote starts to spawn a boss? [0-100] as percentage");
+	
+	RegAdminCmd("sm_getcoords", GetCoords, 	ADMFLAG_GENERIC, "Get the Coordinates of your cursor.");
+	RegAdminCmd("sm_forceboss", ForceBoss, 	ADMFLAG_GENERIC, "Forces a auto-spawning boss to spawn early.");
+	RegAdminCmd("sm_fb", 		ForceBoss, 	ADMFLAG_GENERIC, "Forces a auto-spawning boss to spawn early.");
+	RegAdminCmd("sm_spawnboss", SpawnMenu,	ADMFLAG_GENERIC, "Opens a menu to spawn a boss.");
+	RegAdminCmd("sm_sb", 		SpawnMenu,	ADMFLAG_GENERIC, "Opens a menu to spawn a boss.");
+	RegAdminCmd("sm_slayboss", 	SlayBoss,	ADMFLAG_GENERIC, "Slay all active bosses on map.");
+	RegAdminCmd("sm_forcevote", ForceVote,	ADMFLAG_GENERIC, "Start a vote, this is the same as !forceboss if sm_boss_mode was set to 2");
 	
 	RegConsoleCmd("sm_voteboss", VoteBoss, "Start a vote, needs minimum amount of people to run this command to start a vote.  Follows sm_boss_vote");
 	
-	HookEvent("teamplay_round_start", 			RoundStart, 		EventHookMode_Pre);
-	HookEvent("pumpkin_lord_summoned", 			Boss_Summoned, 		EventHookMode_Pre);
-	HookEvent("pumpkin_lord_killed", 			Boss_Killed, 		EventHookMode_Pre);
-	HookEvent("merasmus_summoned", 				Boss_Summoned, 		EventHookMode_Pre);
-	HookEvent("merasmus_killed", 				Boss_Killed, 		EventHookMode_Pre);
-	HookEvent("eyeball_boss_summoned", 			Boss_Summoned, 		EventHookMode_Pre);
-	HookEvent("eyeball_boss_killed", 			Boss_Killed, 		EventHookMode_Pre);
-	HookEvent("merasmus_escape_warning", 		Merasmus_Leave, 	EventHookMode_Pre);
-	HookEvent("eyeball_boss_escape_imminent", 	Monoculus_Leave, 	EventHookMode_Pre);
+	HookEvent("teamplay_round_start", 			RoundStart, 	EventHookMode_Pre);
+	HookEvent("pumpkin_lord_summoned", 			Boss_Summoned, 	EventHookMode_Pre);
+	HookEvent("eyeball_boss_summoned", 			Boss_Summoned, 	EventHookMode_Pre);
+	HookEvent("merasmus_summoned", 				Boss_Summoned, 	EventHookMode_Pre);
+	HookEvent("pumpkin_lord_killed", 			Boss_Killed, 	EventHookMode_Pre);
+	HookEvent("eyeball_boss_killed", 			Boss_Killed, 	EventHookMode_Pre);
+	HookEvent("merasmus_killed", 				Boss_Killed, 	EventHookMode_Pre);
+	HookEvent("merasmus_escape_warning", 		Merasmus_Leave, EventHookMode_Pre);
+	HookEvent("eyeball_boss_escape_imminent", 	Monoculus_Leave,EventHookMode_Pre);
 	
 	HookUserMessage(GetUserMessageId("SayText2"), SayText2, true);
-
-	for(int i = 1; i < sizeof(cVars); i++)
-		cVars[i].AddChangeHook(cVarChange);
 	
 	gArray = new ArrayList();
 	gData = new ArrayList();
@@ -156,6 +159,9 @@ public void OnPluginStart() {
 	g_cMerasmus_Lifetime = FindConVar("tf_merasmus_lifetime");
 	g_iEyeball_Default = g_cEyeball_Lifetime.IntValue;
 	g_iMerasmus_Default = g_cMerasmus_Lifetime.IntValue;
+	
+	g_cMinplayers.AddChangeHook(OnConvarChanged);
+	g_cInterval.AddChangeHook(OnConvarChanged);
 	
 	LoadTranslations("common.phrases");
 	LoadTranslations("bossspawner.phrases");
@@ -171,93 +177,62 @@ public void OnPluginEnd()
 	SetMerasmusLifetime(g_iMerasmus_Default);
 }
 
-public void OnConfigsExecuted() {
-	sMode 		= 	GetConVarInt(cVars[1]);
-	sInterval 	= 	GetConVarInt(cVars[2]);
-	sMin		= 	GetConVarInt(cVars[3]);
-	sHUDx 		= 	GetConVarFloat(cVars[4]);
-	sHUDy 		= 	GetConVarFloat(cVars[5]);
-	sHealthBar 	= 	GetConVarInt(cVars[6]);
-	gMinVotes	=	GetConVarInt(cVars[7]);
-	
+public void OnConfigsExecuted() 
+{	
 	SetupMapConfigs("bossspawner_maps.cfg");
 	SetupBossConfigs("bossspawner_boss.cfg");
 	SetupDownloads("bossspawner_downloads.cfg");
-	if(gEnabled) {
-		FindHealthBar();
-		PrecacheSound("items/cart_explode.wav");
-		for(int i = 1; i <= MaxClients; i++) {
-			if(IsClientInGame(i)) {
-				SDKHook(i, SDKHook_OnTakeDamage, OnClientDamaged);
-			}
-		}
-	}
+	
+	if (!gEnabled)
+		return;
+		
+	FindHealthBar();
+	PrecacheSound("items/cart_explode.wav");
+	
+	for (int i = 1; i <= MaxClients; i++)
+		if(IsClientInGame(i))
+			SDKHook(i, SDKHook_OnTakeDamage, OnClientDamaged);
 }
 
-public void OnMapEnd() {
-	//ClearTimer(cTimer);
+public void OnMapEnd()
+{
 	delete cTimer;
 	RemoveExistingBoss();
 }
 
-public void OnClientPostAdminCheck(int client) {
-	if(GetClientCount(true) == sMin) {
-		if(g_AutoBoss == 0) {
+public void OnClientPostAdminCheck(int client)
+{
+	if (GetClientCount(true) == g_cMinplayers.IntValue)
+		if(g_AutoBoss == 0)
 			ResetTimer();
-		}
-	}
 	SDKHook(client, SDKHook_OnTakeDamage, OnClientDamaged);
 }
 
-public void OnClientDisconnect_Post(int client) {
-	if(GetClientCount(true) < sMin) {
-		//ClearTimer(cTimer);
+public void OnClientDisconnect_Post(int client)
+{
+	if (GetClientCount(true) < g_cMinplayers.IntValue)
 		delete cTimer;
-	}
-	SDKUnhook(client, SDKHook_OnTakeDamage, OnClientDamaged);
 	gVotes[client] = 0;
 }
 
-public void cVarChange(Handle convar, char[] oldValue, char[] newValue) {
+public void OnConvarChanged(ConVar convar, char[] oldValue, char[] newValue)
+{
 	if (StrEqual(oldValue, newValue, true))
 		return;
-	
-	float iNewValue = StringToFloat(newValue);
-
-	if(convar == cVars[1]) {
-		sMode = RoundFloat(iNewValue);
-	}
-	else if((convar == cVars[2]) || (convar == cVars[3])) {
-		if(convar == cVars[2]) 
-			sInterval = RoundFloat(iNewValue);
-		else
-			sMin = RoundFloat(iNewValue);
 		
-		if(GetClientCount(true) >= sMin) {
-			if(g_AutoBoss == 0) {
-				ResetTimer();
-			}
-		}
-		else {
-			//ClearTimer(cTimer);
+	if (convar == g_cMinplayers)
+	{
+		if (!g_AutoBoss)
+			ResetTimer();
+		else
 			delete cTimer;
-		}
 	}
-	else if(convar == cVars[4]) {
-		sHUDx = iNewValue;
-	}
-	else if(convar == cVars[5]) {
-		sHUDy = iNewValue;
-	}
-	else if(convar == cVars[6]) {
-		sHealthBar = RoundFloat(iNewValue);
-	}
-	else if(convar == cVars[7]) {
-		gMinVotes = RoundFloat(iNewValue);
-	}
+	else if (convar == g_cInterval)
+		g_iInterval = StringToInt(newValue);
 }
 
-public Action SayText2(UserMsg msg_id, Handle bf, int[] players, int playersNum, bool reliable, bool init) {
+public Action SayText2(UserMsg msg_id, Handle bf, int[] players, int playersNum, bool reliable, bool init)
+{
 	if(!reliable) 
 		return Plugin_Continue;
 	
@@ -267,49 +242,53 @@ public Action SayText2(UserMsg msg_id, Handle bf, int[] players, int playersNum,
 	
 	BfReadString(bf, buffer, sizeof(buffer));
 	
-	if(StrEqual(buffer, "#TF_Halloween_Boss_Killers")) {
+	if(StrEqual(buffer, "#TF_Halloween_Boss_Killers") || StrEqual(buffer, "#TF_Halloween_Eyeball_Boss_Killers") || StrEqual(buffer, "#TF_Halloween_Merasmus_Killers"))
 		return Plugin_Handled;
-	}
-	if(StrEqual(buffer, "#TF_Halloween_Eyeball_Boss_Killers")) {
-		return Plugin_Handled;
-	}
-	if(StrEqual(buffer, "#TF_Halloween_Merasmus_Killers")) {
-		return Plugin_Handled;
-	}
+		
 	return Plugin_Continue;
 }
 
 /* -----------------------------------EVENT HANDLES-----------------------------------*/
-public Action RoundStart(Handle event, const char[] name, bool dontBroadcast) {
+public Action RoundStart(Event event, const char[] name, bool dontBroadcast)
+{
 	g_AutoBoss = 0;
-	if(!gEnabled) return Plugin_Continue;
-	//ClearTimer(cTimer);
-	delete cTimer;
-	if(GetClientCount(true) >= sMin) {
-		if(g_AutoBoss == 0) {
+	
+	if(!gEnabled)
+		return Plugin_Continue;
+	
+	if(GetClientCount(true) >= g_cMinplayers.IntValue)
+		if(g_AutoBoss == 0)
 			ResetTimer();
-		}
-	}
+			
+	delete cTimer;
 	return Plugin_Continue;
 }
 
-public Action Boss_Summoned(Handle event, const char[] name, bool dontBroadcast) {
-	if(!gEnabled) return Plugin_Continue;
+public Action Boss_Summoned(Event event, const char[] name, bool dontBroadcast)
+{
+	if(!gEnabled)
+		return Plugin_Continue;
 	return Plugin_Handled;
 }
 
-public Action Boss_Killed(Handle event, const char[] name, bool dontBroadcast) {
-	if(!gEnabled) return Plugin_Continue;
+public Action Boss_Killed(Event event, const char[] name, bool dontBroadcast)
+{
+	if(!gEnabled)
+		return Plugin_Continue;
 	return Plugin_Handled;
 }
 
-public Action Merasmus_Leave(Handle event, const char[] name, bool dontBroadcast) {
-	if(!gEnabled) return Plugin_Continue;
+public Action Merasmus_Leave(Event event, const char[] name, bool dontBroadcast)
+{
+	if(!gEnabled)
+		return Plugin_Continue;
 	return Plugin_Handled;
 }
 
-public Action Monoculus_Leave(Handle event, const char[] name, bool dontBroadcast) {
-	if(!gEnabled) return Plugin_Continue;
+public Action Monoculus_Leave(Event event, const char[] name, bool dontBroadcast)
+{
+	if(!gEnabled)
+		return Plugin_Continue;
 	return Plugin_Handled;
 }
 /* -----------------------------------EVENT HANDLES-----------------------------------*/
@@ -331,7 +310,7 @@ public Action VoteBoss(int client, int args) {
 				total++;
 		}
 		int percentage = (total / GetClientCount(true) * 100);
-		if(percentage >= gMinVotes) {
+		if(percentage >= g_cVote.IntValue) {
 			for(int i = 0; i < MaxClients; i++) {
 				gVotes[i] = 0;
 			}
@@ -341,7 +320,7 @@ public Action VoteBoss(int client, int args) {
 		else {
 			char name[32];
 			GetClientName(client, name, sizeof(name));
-			CPrintToChatAll("{frozen}[Boss] {orange}%s has casted a vote! %d%% out of %d%% is needed to start a vote!", name, percentage, gMinVotes);
+			CPrintToChatAll("{frozen}[Boss] {orange}%s has casted a vote! %d%% out of %d%% is needed to start a vote!", name, percentage, g_cVote.IntValue);
 		}
 	}
 	else {
@@ -735,7 +714,7 @@ public bool TraceentFilterPlayer(int ent, int contentsMask) {
 void SpawnBoss() {
 	gActiveTimer = true;
 	char sGlow[32];
-	switch(sMode) {
+	switch(g_cMode.IntValue) {
 		case 0: {
 			gIndex = GetRandomInt(0, gArray.Length-1);
 			CreateBoss(gIndex, gPos, -1, -1, -1.0, sGlow, false);
@@ -1020,7 +999,7 @@ public Action RemoveTimerPrint(Handle hTimer, DataPack hPack) {
 
 //Instead of hooking to sdkhook_takedamage, we use a 0.5 timer because of hud overloading when taking damage
 public Action HealthTimer(Handle hTimer, any ref) {
-	if(sHealthBar == 0 || sHealthBar == 1) {
+	if(g_cHealthbar.IntValue == 0 || g_cHealthbar.IntValue == 1) {
 		return Plugin_Continue;
 	}
 	if(gTrack != -1 && IsValidEntity(gTrack)) {
@@ -1109,33 +1088,39 @@ void ResizeHitbox(int entity, float fScale) {
 /* --------------------------------BOSS SPAWNING CORE---------------------------------*/
 
 /* ---------------------------------TIMER & HUD CORE----------------------------------*/
-public void HUDTimer() {
-	if(!gEnabled) return;
-	sInterval = GetConVarInt(cVars[2]);		//eh lazy
-	cTimer = CreateTimer(1.0, HUDCountDown, _, TIMER_REPEAT);
+public void CreateCountdownTimer()
+{
+	if (!gEnabled) 
+		return;
+	g_iInterval = g_cInterval.IntValue;
+	cTimer = CreateTimer(1.0, Timer_HUDCounter, _, TIMER_REPEAT);
 }
 
-public Action HUDCountDown(Handle hTimer) {
-	for(int i = 1; i <= MaxClients; i++) {
-		if(IsClientInGame(i)) {
-			SetHudTextParams(sHUDx, sHUDy, 1.0, 255, 255, 255, 255);
-			ShowHudText(i, -1, "Boss: %d seconds", sInterval);
+public Action Timer_HUDCounter(Handle hTimer)
+{
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if(IsClientInGame(i))
+		{
+			SetHudTextParams(g_cHudx.FloatValue, g_cHudy.FloatValue, 1.0, 255, 255, 255, 255);
+			ShowHudText(i, -1, "Boss: %d seconds", g_iInterval);
 		}
 	}
-	if(sInterval <= 0) {
+	if (g_iInterval <= 0)
+	{
 		SpawnBoss();
 		cTimer = null;
 		return Plugin_Stop;
 	}
-	sInterval--;
+	g_iInterval--;
 	return Plugin_Continue;
 }
 
 void ResetTimer() {
 	//ClearTimer(cTimer);
 	delete cTimer;
-	HUDTimer();
-	CPrintToChatAll("%t", "Time", sInterval);
+	CreateCountdownTimer();
+	CPrintToChatAll("%t", "Time", g_cInterval.IntValue);
 }
 /* ---------------------------------TIMER & HUD CORE----------------------------------*/
 
@@ -1219,8 +1204,8 @@ public void OnEntityDestroyed(int ent) {
 				if(!StrEqual(sDSound, "none", false)) {
 					EmitSoundToAll(sDSound, _, _, _, _, 1.0);
 				}
-				if(timed && GetClientCount(true) >= sMin && g_AutoBoss == 0) {
-					//CPrintToChatAll("%t", "Time", sInterval);
+				if(timed && GetClientCount(true) >= g_cMinplayers.IntValue && g_AutoBoss == 0) {
+					//CPrintToChatAll("%t", "Time", g_cInterval.IntValue);
 					ResetTimer();
 				}
 				delete dMax;
@@ -1302,7 +1287,7 @@ public Action OnClientDamaged(int victim, int &attacker, int &inflictor, float &
 
 public void UpdateBossHealth(int ent) 
 {
-	if(gHPbar == -1 || sHealthBar == 0 || sHealthBar == 2)
+	if(gHPbar == -1 || g_cHealthbar.IntValue == 0 || g_cHealthbar.IntValue == 2)
 		return;
 		
 	int percentage;
@@ -1442,9 +1427,9 @@ public void SetupMapConfigs(const char[] sFile) {
 	}
 	if(mapEnabled != 0) {
 		gEnabled = true;
-		if(GetClientCount(true) >= sMin) {
-			HUDTimer();
-			CPrintToChatAll("%t", "Time", sInterval);
+		if(GetClientCount(true) >= g_cMinplayers.IntValue) {
+			CreateCountdownTimer();
+			CPrintToChatAll("%t", "Time", g_cInterval.IntValue);
 		}
 	}
 	else if(mapEnabled == 0) {
