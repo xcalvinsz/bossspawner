@@ -18,6 +18,7 @@ Version Log:
 	- Updated some syntax and code clean up
 	- No longer caches values from convars (convars.IntValue is already cached)
 	- No longer need to unhook sdkhook on client disconnect
+	- Optimization of code
 	- General code cleanup
 
 v.5.0.2
@@ -95,7 +96,7 @@ bool gEnabled;
 //Other variables
 int gIndex, gIndexCmd;
 float gPos[3], kPos[3];
-bool gActiveTimer;
+//bool gActiveTimer;
 int g_AutoBoss, gTrack = -1, gHPbar = -1;
 
 int gVotes[MAXPLAYERS+1];
@@ -106,6 +107,7 @@ int argIndex, saveIndex;
 
 ConVar g_cMode, g_cInterval, g_cMinplayers, g_cHudx, g_cHudy, g_cHealthbar, g_cVote;
 int g_iInterval;
+int g_iTotalVotes;
 
 public Plugin myinfo = 
 {
@@ -213,6 +215,7 @@ public void OnClientDisconnect_Post(int client)
 	if (GetClientCount(true) < g_cMinplayers.IntValue)
 		delete cTimer;
 	gVotes[client] = 0;
+	g_iTotalVotes--;
 }
 
 public void OnConvarChanged(ConVar convar, char[] oldValue, char[] newValue)
@@ -242,7 +245,7 @@ public Action SayText2(UserMsg msg_id, Handle bf, int[] players, int playersNum,
 	
 	BfReadString(bf, buffer, sizeof(buffer));
 	
-	if(StrEqual(buffer, "#TF_Halloween_Boss_Killers") || StrEqual(buffer, "#TF_Halloween_Eyeball_Boss_Killers") || StrEqual(buffer, "#TF_Halloween_Merasmus_Killers"))
+	if (StrEqual(buffer, "#TF_Halloween_Boss_Killers") || StrEqual(buffer, "#TF_Halloween_Eyeball_Boss_Killers") || StrEqual(buffer, "#TF_Halloween_Merasmus_Killers"))
 		return Plugin_Handled;
 		
 	return Plugin_Continue;
@@ -253,10 +256,10 @@ public Action RoundStart(Event event, const char[] name, bool dontBroadcast)
 {
 	g_AutoBoss = 0;
 	
-	if(!gEnabled)
+	if (!gEnabled)
 		return Plugin_Continue;
 	
-	if(GetClientCount(true) >= g_cMinplayers.IntValue)
+	if (GetClientCount(true) >= g_cMinplayers.IntValue)
 		if(g_AutoBoss == 0)
 			ResetTimer();
 			
@@ -266,28 +269,28 @@ public Action RoundStart(Event event, const char[] name, bool dontBroadcast)
 
 public Action Boss_Summoned(Event event, const char[] name, bool dontBroadcast)
 {
-	if(!gEnabled)
+	if (!gEnabled)
 		return Plugin_Continue;
 	return Plugin_Handled;
 }
 
 public Action Boss_Killed(Event event, const char[] name, bool dontBroadcast)
 {
-	if(!gEnabled)
+	if (!gEnabled)
 		return Plugin_Continue;
 	return Plugin_Handled;
 }
 
 public Action Merasmus_Leave(Event event, const char[] name, bool dontBroadcast)
 {
-	if(!gEnabled)
+	if (!gEnabled)
 		return Plugin_Continue;
 	return Plugin_Handled;
 }
 
 public Action Monoculus_Leave(Event event, const char[] name, bool dontBroadcast)
 {
-	if(!gEnabled)
+	if (!gEnabled)
 		return Plugin_Continue;
 	return Plugin_Handled;
 }
@@ -295,154 +298,170 @@ public Action Monoculus_Leave(Event event, const char[] name, bool dontBroadcast
 
 /* ---------------------------------COMMAND FUNCTION----------------------------------*/
 
-public Action VoteBoss(int client, int args) {
-	if(!gEnabled) {
+public Action VoteBoss(int client, int args)
+{
+	if (!gEnabled)
+	{
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	if(!IsClientInGame(client))
+	
+	if (!IsClientInGame(client))
 		return Plugin_Handled;
-	if(!gVotes[client]) {
+		
+	if (!gVotes[client])
+	{
 		gVotes[client] = 1;
-		int total;
-		for(int i = 0; i < MaxClients; i++) {
-			if(gVotes[i])
-				total++;
-		}
-		int percentage = (total / GetClientCount(true) * 100);
-		if(percentage >= g_cVote.IntValue) {
-			for(int i = 0; i < MaxClients; i++) {
+		g_iTotalVotes++;
+		
+		int percentage = (g_iTotalVotes / GetClientCount(true) * 100);
+		
+		if (percentage >= g_cVote.IntValue)
+		{
+			for(int i = 0; i < MaxClients; i++)
 				gVotes[i] = 0;
-			}
 			delete cTimer;
 			CreateVote();
 		}
-		else {
-			char name[32];
-			GetClientName(client, name, sizeof(name));
-			CPrintToChatAll("{frozen}[Boss] {orange}%s has casted a vote! %d%% out of %d%% is needed to start a vote!", name, percentage, g_cVote.IntValue);
-		}
+		else
+			CPrintToChatAll("{frozen}[Boss] {orange}%N has casted a vote! %d%% out of %d%% is needed to start a vote!", client, percentage, g_cVote.IntValue);
 	}
-	else {
+	else
 		CReplyToCommand(client, "{frozen}[Boss] {orange}You have already casted a vote!");
-	}
 	return Plugin_Handled;
 }
 
-public Action ForceBoss(int client, int args) {
-	if(!gEnabled) {
+public Action ForceBoss(int client, int args)
+{
+	if (!gEnabled)
+	{
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	gActiveTimer = true;
-	if(args == 1) {
+	//gActiveTimer = true;
+	if (args == 1)
+	{
 		saveIndex = gIndex;
-		char arg1[32];
-		char sName[64];
+		char arg1[32], sName[64];
 		GetCmdArg(1, arg1, sizeof(arg1));
 		int i;
-		for(i = 0; i < gArray.Length; i++) {
+		for (i = 0; i < gArray.Length; i++)
+		{
 			StringMap HashMap = gArray.Get(i);
 			HashMap.GetString("Name", sName, sizeof(sName));
-			if(StrEqual(sName, arg1, false)) {
-				gIndex = i;
-				break;
+			if (StrEqual(sName, arg1, false))
+			{
+				gIndex = i; break;
 			}
 		}
-		if(i == gArray.Length) {
+		
+		if (i == gArray.Length)
+		{
 			CReplyToCommand(client, "{frozen}[Boss] {red}Error: {orange}Boss does not exist.");
 			return Plugin_Handled;
 		}
-		//ClearTimer(cTimer);
-		delete cTimer;
 		argIndex = 1;
+		delete cTimer;
 		char sGlow[32];
-		CreateBoss(gIndex, gPos, -1, -1, -1.0, sGlow, false);
+		CreateBoss(gIndex, gPos, -1, -1, -1.0, sGlow, false, true);
 	}
-	else if(args == 0) {
+	else if (args == 0)
+	{
 		argIndex = 0;
-		//ClearTimer(cTimer);
 		delete cTimer;
 		SpawnBoss();
 	}
-	else {
+	else
 		CReplyToCommand(client, "{frozen}[Boss] {red}Format: {orange}!forceboss <bossname>");
-	}
 	return Plugin_Handled;
 }
 
-public Action GetCoords(int client, int args) {
-	if(!gEnabled) {
+public Action GetCoords(int client, int args)
+{
+	if (!gEnabled)
+	{
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	if(!IsClientInGame(client) || !IsPlayerAlive(client)) {
+	
+	if (!IsClientInGame(client) || !IsPlayerAlive(client)) {
 		CReplyToCommand(client, "{frozen}[Boss] You must be alive and in-game to use this command.");
 		return Plugin_Handled;
 	}
+	
 	float l_pos[3];
 	GetClientAbsOrigin(client, l_pos);
 	CReplyToCommand(client, "{frozen}[Boss] {orange}Coordinates: %0.0f,%0.0f,%0.0f\n{frozen}[Boss] {orange}Use those coordinates and place them in configs/bossspawner_maps.cfg", l_pos[0], l_pos[1], l_pos[2]);
 	return Plugin_Handled;
 }
 
-public Action SlayBoss(int client, int args) {
-	if(!gEnabled) {
+public Action SlayBoss(int client, int args)
+{
+	if (!gEnabled)
+	{
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	//ClearTimer(cTimer);
+	
 	RemoveExistingBoss();
 	CReplyToCommand(client, "%t", "Boss_Slain");
 	return Plugin_Handled;
 }
 
-public Action ForceVote(int client, int args) {
-	if(!gEnabled) {
+public Action ForceVote(int client, int args)
+{
+	if (!gEnabled)
+	{
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	//ClearTimer(cTimer);
 	delete cTimer;
 	CreateVote();
 	//CReplyToCommand(client, "%t", "Vote_Started");
 	return Plugin_Handled;
 }
 
-public Action OnClientSayCommand(int client, const char[] command, const char[] sArgs) {
+public Action OnClientSayCommand(int client, const char[] command, const char[] sArgs)
+{
 	char arg[4][64];
 	int args = ExplodeString(sArgs, " ", arg, sizeof(arg), sizeof(arg[]));
-	//int returnType = 0;
-	if(arg[0][0] == '!' || arg[0][0] == '/') {
+	
+	if (arg[0][0] == '!' || arg[0][0] == '/')
 		strcopy(arg[0], 64, arg[0][1]);
-	}
-	else return Plugin_Continue;
-	int i;
-	StringMap HashMap = null;
-	char sName[64];
-	for(i = 0; i < gArray.Length; i++) {
+	else 
+		return Plugin_Continue;
+		
+	int i; StringMap HashMap; char sName[64];
+	
+	for (i = 0; i < gArray.Length; i++)
+	{
 		HashMap = gArray.Get(i);
 		HashMap.GetString("Name", sName, sizeof(sName));
-		if(StrEqual(sName, arg[0], false)){
+		
+		if (StrEqual(sName, arg[0], false))
 			break;
-		}
 	}
-	if(i == gArray.Length) {
+	if (i == gArray.Length)
 		return Plugin_Continue;
-	}
-	if(!gEnabled) {
+		
+	if (!gEnabled)
+	{
 		CPrintToChat(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	if(!CheckCommandAccess(client, "sm_boss_override", ADMFLAG_GENERIC, false)) {
+	
+	if (!CheckCommandAccess(client, "sm_boss_override", ADMFLAG_GENERIC, false))
+	{
 		CPrintToChat(client, "{frozen}[Boss] {orange}You do not have access to this command.");
 		return Plugin_Handled;
 	}
-	if(!IsClientInGame(client) || !IsPlayerAlive(client)) {
+	if (!IsClientInGame(client) || !IsPlayerAlive(client))
+	{
 		CPrintToChat(client, "{frozen}[Boss] {orange}You must be alive and in-game to use this command.");
 		return Plugin_Handled;
 	}
-	if(!SetTeleportEndPoint(client)) {
+	if (!SetTeleportEndPoint(client))
+	{
 		CPrintToChat(client, "{Frozen}[Boss] {orange}Could not find spawn point.");
 		return Plugin_Handled;
 	}
@@ -450,31 +469,37 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 	int iBaseHP = -1, iScaleHP = -1;
 	char sGlow[32];
 	float iSize = -1.0;
-	if(args < 1 || args > 4) {
+	if (args < 1 || args > 4)
+	{
 		CPrintToChat(client, "{Frozen}[Boss] {orange}Incorrect parameters: !<bossname> <health> <optional:size> <optional:RGBA values for color>");
 		CPrintToChat(client, "{Frozen}[Boss] {orange}Example usage: !horseman 1000 2 255,255,255,255");
 		return Plugin_Handled;
 	}
-	else {
-		if(args > 1) {
+	else
+	{
+		if(args > 1)
+		{
 			iBaseHP = StringToInt(arg[1]);
 			iScaleHP = 0;
 		}
-		if(args > 2) {
+		
+		if(args > 2)
 			iSize = StringToFloat(arg[2]);
-		}
-		if(args > 3) {
+			
+		if(args > 3)
+		{
 			Format(sGlow, sizeof(sGlow), "%s", arg[3]);
 			ReplaceString(sGlow, sizeof(sGlow), ",", " ", false);
 		}
 	}
 	gIndexCmd = i;
-	gActiveTimer = false;
-	CreateBoss(gIndexCmd, kPos, iBaseHP, iScaleHP, iSize, sGlow, true);
+	//gActiveTimer = false;
+	CreateBoss(gIndexCmd, kPos, iBaseHP, iScaleHP, iSize, sGlow, true, false);
 	return Plugin_Handled;
 }
 
-public Action SpawnBossCommand(int client, const char[] command, int args) {
+public Action SpawnBossCommand(int client, const char[] command, int args)
+{
 	char arg1[64], arg2[32], arg3[32];
 	GetCmdArg(1, arg1, sizeof(arg1));
 	int i;
@@ -483,29 +508,38 @@ public Action SpawnBossCommand(int client, const char[] command, int args) {
 	int nIndex = FindCharInString(command, '_', _) + 1;
 	char command2[64];
 	strcopy(command2, sizeof(command2), command[nIndex]);
-	for(i = 0; i < gArray.Length; i++) {
+	
+	for (i = 0; i < gArray.Length; i++)
+	{
 		HashMap = gArray.Get(i);
 		HashMap.GetString("Name", sName, sizeof(sName));
-		if(StrEqual(sName, command2, false)){
+		
+		if(StrEqual(sName, command2, false))
 			break;
-		}
 	}
-	if(i == gArray.Length) {
+	if (i == gArray.Length)
 		return Plugin_Continue;
-	}
-	if(!gEnabled) {
+		
+	if (!gEnabled)
+	{
 		CPrintToChat(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	if(!CheckCommandAccess(client, "sm_boss_override", ADMFLAG_GENERIC, false)) {
+	
+	if (!CheckCommandAccess(client, "sm_boss_override", ADMFLAG_GENERIC, false))
+	{
 		CPrintToChat(client, "{frozen}[Boss] {orange}You do not have access to this command.");
 		return Plugin_Handled;
 	}
-	if(!IsClientInGame(client) || !IsPlayerAlive(client)) {
+	
+	if (!IsClientInGame(client) || !IsPlayerAlive(client))
+	{
 		CPrintToChat(client, "{frozen}[Boss] {orange}You must be alive and in-game to use this command.");
 		return Plugin_Handled;
 	}
-	if(!SetTeleportEndPoint(client)) {
+	
+	if (!SetTeleportEndPoint(client))
+	{
 		CPrintToChat(client, "{Frozen}[Boss] {orange}Could not find spawn point.");
 		return Plugin_Handled;
 	}
@@ -514,39 +548,49 @@ public Action SpawnBossCommand(int client, const char[] command, int args) {
 	char sGlow[32];
 	float iSize = -1.0;
 	
-	if(args < 0 || args > 3) {
+	if (args < 0 || args > 3)
+	{
 		CPrintToChat(client, "{Frozen}[Boss] {orange}Incorrect parameters: !<bossname> <health> <optional:size> <optional:RGBA values for color>");
 		CPrintToChat(client, "{Frozen}[Boss] {orange}Example usage: !horseman 1000 2 255,255,255,255");
 		return Plugin_Handled;
 	}
-	else {
-		if(args > 0) {
+	else
+	{
+		if (args > 0)
+		{
 			GetCmdArg(1, arg1, sizeof(arg1));
 			iBaseHP = StringToInt(arg1);
 			iScaleHP = 0;
 		}
-		if(args > 1) {
+		
+		if (args > 1)
+		{
 			GetCmdArg(2, arg2, sizeof(arg2));
 			iSize = StringToFloat(arg2);
 		}
-		if(args > 2) {
+		
+		if (args > 2)
+		{
 			GetCmdArg(3, arg3, sizeof(arg3));
 			Format(sGlow, sizeof(sGlow), "%s", arg3);
 			ReplaceString(sGlow, sizeof(sGlow), ",", " ", false);
 		}
 	}
 	gIndexCmd = i;
-	gActiveTimer = false;
-	CreateBoss(gIndexCmd, kPos, iBaseHP, iScaleHP, iSize, sGlow, true);
+	//gActiveTimer = false;
+	CreateBoss(gIndexCmd, kPos, iBaseHP, iScaleHP, iSize, sGlow, true, false);
 	return Plugin_Handled;
 }
 
-public Action SpawnMenu(int client, int args) {
-	if(!gEnabled) {
+public Action SpawnMenu(int client, int args)
+{
+	if (!gEnabled)
+	{
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	if(!IsClientInGame(client)) {
+	if (!IsClientInGame(client))
+	{
 		CReplyToCommand(client, "{frozen}[Boss] You must be alive and in-game to use this command.");
 		return Plugin_Handled;
 	}
@@ -554,12 +598,14 @@ public Action SpawnMenu(int client, int args) {
 	return Plugin_Handled;
 }
 
-public void ShowMenu(int client) {
+public void ShowMenu(int client)
+{
 	StringMap HashMap = null;
 	char sName[64], sInfo[8];
 	Menu menu = new Menu(DisplayHealth);
 	SetMenuTitle(menu, "Boss Menu");
-	for(int i = 0; i < gArray.Length; i++) {
+	for (int i = 0; i < gArray.Length; i++)
+	{
 		HashMap = gArray.Get(i);
 		HashMap.GetString("Name", sName, sizeof(sName));
 		IntToString(i, sInfo, sizeof(sInfo));
@@ -569,15 +615,18 @@ public void ShowMenu(int client) {
 	menu.Display(client, MENU_TIME_FOREVER);
 }
 
-public int DisplayHealth(Menu MenuHandle, MenuAction action, int client, int num) {
-	if(action == MenuAction_Select) {
+public int DisplayHealth(Menu MenuHandle, MenuAction action, int client, int num)
+{
+	if (action == MenuAction_Select)
+	{
 		char info[32];
 		MenuHandle.GetItem(num, info, sizeof(info));
 		Menu menu = new Menu(DisplaySizes);
 		menu.SetTitle("Boss Health");
 		char param[32];
 		char health[][] = {"1000", "5000", "10000", "15000", "20000", "30000", "50000"};
-		for(int i = 0; i < sizeof(health); i++) {
+		for (int i = 0; i < sizeof(health); i++)
+		{
 			Format(param, sizeof(param), "%s %s", info, health[i]);
 			menu.AddItem(param, health[i]);
 		}
@@ -585,20 +634,22 @@ public int DisplayHealth(Menu MenuHandle, MenuAction action, int client, int num
 		menu.ExitButton = true;
 		menu.Display(client, MENU_TIME_FOREVER);
 	}
-	else if(action == MenuAction_End) {
+	else if (action == MenuAction_End)
 		delete MenuHandle;
-	}
 }
 
-public int DisplaySizes(Menu MenuHandle, MenuAction action, int client, int num) {
-	if(action == MenuAction_Select) {
+public int DisplaySizes(Menu MenuHandle, MenuAction action, int client, int num)
+{
+	if (action == MenuAction_Select)
+	{
 		char info[32];
 		MenuHandle.GetItem(num, info, sizeof(info));
 		Menu menu = new Menu(DisplayGlow);
 		menu.SetTitle("Boss Size");
 		char param[32];
 		char size[][] = {"0.5", "1.0", "1.5", "2.0", "3.0", "4.0", "5.0"};
-		for(int i = 0; i < sizeof(size); i++) {
+		for (int i = 0; i < sizeof(size); i++)
+		{
 			Format(param, sizeof(param), "%s %s", info, size[i]);
 			menu.AddItem(param, size[i]);
 		}
@@ -606,13 +657,14 @@ public int DisplaySizes(Menu MenuHandle, MenuAction action, int client, int num)
 		menu.ExitButton = true;
 		menu.Display(client, MENU_TIME_FOREVER);
 	}
-	else if(action == MenuAction_End) {
+	else if (action == MenuAction_End)
 		delete MenuHandle;
-	}
 }
 
-public int DisplayGlow(Menu MenuHandle, MenuAction action, int client, int num) {
-	if(action == MenuAction_Select) {
+public int DisplayGlow(Menu MenuHandle, MenuAction action, int client, int num)
+{
+	if (action == MenuAction_Select)
+	{
 		char info[32];
 		MenuHandle.GetItem(num, info, sizeof(info));
 		Menu menu = new Menu(EndMenu);
@@ -649,13 +701,14 @@ public int DisplayGlow(Menu MenuHandle, MenuAction action, int client, int num) 
 		menu.ExitButton = true;
 		menu.Display(client, MENU_TIME_FOREVER);
 	}
-	else if(action == MenuAction_End) {
+	else if (action == MenuAction_End)
 		delete MenuHandle;
-	}
 }
 
-public int EndMenu(Menu MenuHandle, MenuAction action, int client, int num) {
-	if(action == MenuAction_Select) {
+public int EndMenu(Menu MenuHandle, MenuAction action, int client, int num)
+{
+	if (action == MenuAction_Select)
+	{
 		char info[32];
 		MenuHandle.GetItem(num, info, sizeof(info));
 		char sAttribute[4][16];
@@ -666,20 +719,20 @@ public int EndMenu(Menu MenuHandle, MenuAction action, int client, int num) {
 		iBaseHP = StringToInt(sAttribute[1]);
 		iSize = StringToFloat(sAttribute[2]);
 		ReplaceString(sAttribute[3], sizeof(sAttribute[]), ",", " ", false);
-		if(!SetTeleportEndPoint(client)) {
+		if (!SetTeleportEndPoint(client)) {
 			CReplyToCommand(client, "{Frozen}[Boss] {orange}Could not find spawn point.");
 			return;
 		}
 		kPos[2] -= 10.0;
-		gActiveTimer = false;
-		CreateBoss(iIndex, kPos, iBaseHP, 0, iSize, sAttribute[3], true);
+		//gActiveTimer = false;
+		CreateBoss(iIndex, kPos, iBaseHP, 0, iSize, sAttribute[3], true, false);
 	}
-	else if(action == MenuAction_End) {
+	else if (action == MenuAction_End)
 		delete MenuHandle;
-	}
 }
 
-bool SetTeleportEndPoint(int client) {
+bool SetTeleportEndPoint(int client)
+{
 	float vAngles[3], vOrigin[3], vBuffer[3], vStart[3], Distance;
 
 	GetClientEyePosition(client,vOrigin);
@@ -687,7 +740,8 @@ bool SetTeleportEndPoint(int client) {
 
 	Handle trace = TR_TraceRayFilterEx(vOrigin, vAngles, MASK_SHOT, RayType_Infinite, TraceentFilterPlayer);
 
-	if(TR_DidHit(trace)) {
+	if (TR_DidHit(trace))
+	{
 		TR_GetEndPosition(vStart, trace);
 		GetVectorDistance(vOrigin, vStart, false);
 		Distance = -35.0;
@@ -696,7 +750,8 @@ bool SetTeleportEndPoint(int client) {
 		kPos[1] = vStart[1] + (vBuffer[1]*Distance);
 		kPos[2] = vStart[2] + (vBuffer[2]*Distance);
 	}
-	else {
+	else
+	{
 		delete trace;
 		return false;
 	}
@@ -705,22 +760,23 @@ bool SetTeleportEndPoint(int client) {
 	return true;
 }
 
-public bool TraceentFilterPlayer(int ent, int contentsMask) {
+public bool TraceentFilterPlayer(int ent, int contentsMask)
+{
 	return ent > GetMaxClients() || !ent;
 }
 /* ---------------------------------COMMAND FUNCTION----------------------------------*/
 
 /* --------------------------------BOSS SPAWNING CORE---------------------------------*/
 void SpawnBoss() {
-	gActiveTimer = true;
+	//gActiveTimer = true;
 	char sGlow[32];
 	switch(g_cMode.IntValue) {
 		case 0: {
 			gIndex = GetRandomInt(0, gArray.Length-1);
-			CreateBoss(gIndex, gPos, -1, -1, -1.0, sGlow, false);
+			CreateBoss(gIndex, gPos, -1, -1, -1.0, sGlow, false, true);
 		}
 		case 1: {
-			CreateBoss(gIndex, gPos, -1, -1, -1.0, sGlow, false);
+			CreateBoss(gIndex, gPos, -1, -1, -1.0, sGlow, false, true);
 		}
 		case 2: {
 			CreateVote();
@@ -767,11 +823,11 @@ public int Handle_VoteMenu(Menu menu, MenuAction action, int param1, int param2)
 		menu.GetItem(param1, iData, sizeof(iData));
 		int index = StringToInt(iData);
 		char sGlow[32];
-		CreateBoss(index, gPos, -1, -1, -1.0, sGlow, false);
+		CreateBoss(index, gPos, -1, -1, -1.0, sGlow, false, true);
 	}
 }
 
-public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, float iSize, const char[] sGlowValue, bool isCMD) {
+public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, float iSize, const char[] sGlowValue, bool isCMD, bool timed) {
 	float temp[3];
 	for(int i = 0; i < 3; i++)
 		temp[i] = kpos[i];
@@ -828,7 +884,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		dReference.Push(dMax);
 		dReference.Push(EntIndexToEntRef(ent));
 		dReference.Push(index);
-		dReference.Push(gActiveTimer);
+		dReference.Push(timed);
 		gData.Push(dReference);
 		
 		TeleportEntity(ent, temp, NULL_VECTOR, NULL_VECTOR);
@@ -894,7 +950,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		else
 			SetGlow(ent, targetname, kpos, sGlowValue);
 		
-		if(gActiveTimer) 
+		if(timed) 
 			g_AutoBoss++;
 			
 		if(i == 0) {
@@ -947,7 +1003,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		gIndex = saveIndex;
 	}
 	
-	if(gActiveTimer == true) {
+	if(timed) {
 		gIndex++;
 		if(gIndex > gArray.Length-1) gIndex = 0;
 	}
