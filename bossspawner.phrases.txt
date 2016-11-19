@@ -23,4 +23,8 @@
 		"#format"	"{1:s}"
 		"en"		"{frozen}[Boss] {orange}{1} has left the map due to boredom."
 	}
+	"Vote_Forced"
+	{
+		"en"		"{frozen}[Boss] {orange}A vote has been forced started."
+	}
 }

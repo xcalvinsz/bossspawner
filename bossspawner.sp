@@ -100,14 +100,13 @@ float gPos[3], kPos[3];
 int g_AutoBoss, gTrack = -1, gHPbar = -1;
 
 int gVotes[MAXPLAYERS+1];
-int g_iEyeball_Default, g_iMerasmus_Default;
 
 //Index saving
 int argIndex, saveIndex;
 
 ConVar g_cMode, g_cInterval, g_cMinplayers, g_cHudx, g_cHudy, g_cHealthbar, g_cVote;
-int g_iInterval;
-int g_iTotalVotes;
+int g_iEyeball_Default, g_iMerasmus_Default;
+int g_iInterval, g_iTotalVotes;
 
 public Plugin myinfo = 
 {
@@ -236,7 +235,7 @@ public void OnConvarChanged(ConVar convar, char[] oldValue, char[] newValue)
 
 public Action SayText2(UserMsg msg_id, Handle bf, int[] players, int playersNum, bool reliable, bool init)
 {
-	if(!reliable) 
+	if (!reliable) 
 		return Plugin_Continue;
 	
 	char buffer[128];
@@ -417,7 +416,7 @@ public Action ForceVote(int client, int args)
 	}
 	delete cTimer;
 	CreateVote();
-	//CReplyToCommand(client, "%t", "Vote_Started");
+	CReplyToCommand(client, "%t", "Vote_Forced");
 	return Plugin_Handled;
 }
 
@@ -455,20 +454,24 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 		CPrintToChat(client, "{frozen}[Boss] {orange}You do not have access to this command.");
 		return Plugin_Handled;
 	}
+	
 	if (!IsClientInGame(client) || !IsPlayerAlive(client))
 	{
 		CPrintToChat(client, "{frozen}[Boss] {orange}You must be alive and in-game to use this command.");
 		return Plugin_Handled;
 	}
+	
 	if (!SetTeleportEndPoint(client))
 	{
 		CPrintToChat(client, "{Frozen}[Boss] {orange}Could not find spawn point.");
 		return Plugin_Handled;
 	}
+	
 	kPos[2] -= 10.0;
 	int iBaseHP = -1, iScaleHP = -1;
 	char sGlow[32];
 	float iSize = -1.0;
+	
 	if (args < 1 || args > 4)
 	{
 		CPrintToChat(client, "{Frozen}[Boss] {orange}Incorrect parameters: !<bossname> <health> <optional:size> <optional:RGBA values for color>");
@@ -493,7 +496,7 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 		}
 	}
 	gIndexCmd = i;
-	//gActiveTimer = false;
+	
 	CreateBoss(gIndexCmd, kPos, iBaseHP, iScaleHP, iSize, sGlow, true, false);
 	return Plugin_Handled;
 }
@@ -719,10 +722,12 @@ public int EndMenu(Menu MenuHandle, MenuAction action, int client, int num)
 		iBaseHP = StringToInt(sAttribute[1]);
 		iSize = StringToFloat(sAttribute[2]);
 		ReplaceString(sAttribute[3], sizeof(sAttribute[]), ",", " ", false);
+		
 		if (!SetTeleportEndPoint(client)) {
 			CReplyToCommand(client, "{Frozen}[Boss] {orange}Could not find spawn point.");
 			return;
 		}
+		
 		kPos[2] -= 10.0;
 		//gActiveTimer = false;
 		CreateBoss(iIndex, kPos, iBaseHP, 0, iSize, sAttribute[3], true, false);
@@ -764,43 +769,29 @@ public bool TraceentFilterPlayer(int ent, int contentsMask)
 {
 	return ent > GetMaxClients() || !ent;
 }
-/* ---------------------------------COMMAND FUNCTION----------------------------------*/
 
-/* --------------------------------BOSS SPAWNING CORE---------------------------------*/
-void SpawnBoss() {
-	//gActiveTimer = true;
-	char sGlow[32];
-	switch(g_cMode.IntValue) {
-		case 0: {
-			gIndex = GetRandomInt(0, gArray.Length-1);
-			CreateBoss(gIndex, gPos, -1, -1, -1.0, sGlow, false, true);
-		}
-		case 1: {
-			CreateBoss(gIndex, gPos, -1, -1, -1.0, sGlow, false, true);
-		}
-		case 2: {
-			CreateVote();
-		}
-	}
-}
-
-public void CreateVote() {
+public void CreateVote()
+{
 	if (IsVoteInProgress())
 		return;
+		
 	CPrintToChatAll("{frozen}[Boss] {orange}A vote has been started to spawn the next boss!");
 	//create a random list to push random bosses
 	ArrayList randomList = new ArrayList();
 	//then clone the original array so we don't mess with the original
 	ArrayList copyList = gArray.Clone();
+	
 	//we loop through the copy list and get a random hash and push it to the random list then erase the index from copylist
-	while(copyList.Length != 0) {
+	while (copyList.Length != 0)
+	{
 		int rand = GetRandomInt(0, copyList.Length-1);
 		randomList.Push(copyList.Get(rand));
 		copyList.Erase(rand);
 	}
 	char iData[64], sName[64];
 	Menu menu = new Menu(Handle_VoteMenu);
-	for(int i = 0; i < randomList.Length; i++) {
+	for (int i = 0; i < randomList.Length; i++)
+	{
 		StringMap HashMap = randomList.Get(i);
 		HashMap.GetString("Name", sName, sizeof(sName));
 		int index = gArray.FindValue(HashMap);
@@ -814,11 +805,12 @@ public void CreateVote() {
 	delete copyList;
 }
 
-public int Handle_VoteMenu(Menu menu, MenuAction action, int param1, int param2) {
-	if(action == MenuAction_End) {
+public int Handle_VoteMenu(Menu menu, MenuAction action, int param1, int param2)
+{
+	if (action == MenuAction_End)
 		delete menu;
-	} 
-	else if(action == MenuAction_VoteEnd) {
+	else if (action == MenuAction_VoteEnd)
+	{
 		char iData[64];
 		menu.GetItem(param1, iData, sizeof(iData));
 		int index = StringToInt(iData);
@@ -827,9 +819,29 @@ public int Handle_VoteMenu(Menu menu, MenuAction action, int param1, int param2)
 	}
 }
 
-public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, float iSize, const char[] sGlowValue, bool isCMD, bool timed) {
+/* ---------------------------------COMMAND FUNCTION----------------------------------*/
+
+/* --------------------------------BOSS SPAWNING CORE---------------------------------*/
+
+public void SpawnBoss()
+{
+	char sGlow[32];
+	switch (g_cMode.IntValue)
+	{
+		case 0:
+		{
+			gIndex = GetRandomInt(0, gArray.Length-1);
+			CreateBoss(gIndex, gPos, -1, -1, -1.0, sGlow, false, true);
+		}
+		case 1: CreateBoss(gIndex, gPos, -1, -1, -1.0, sGlow, false, true);
+		case 2: CreateVote();
+	}
+}
+
+public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, float iSize, const char[] sGlowValue, bool isCMD, bool timed)
+{
 	float temp[3];
-	for(int i = 0; i < 3; i++)
+	for (int i = 0; i < 3; i++)
 		temp[i] = kpos[i];
 	
 	char sName[64], sModel[256], sType[32], sBase[16], sScale[16], sSize[16], sGlow[32], sPosFix[32];
@@ -853,32 +865,33 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	HashMap.GetString("HatPosFix", sHatPosFix, sizeof(sHatPosFix));
 	HashMap.GetString("HatSize", sHatSize, sizeof(sHatSize));
 	
-	if(iBaseHP == -1) {
+	if (iBaseHP == -1)
 		iBaseHP = StringToInt(sBase);
-	}
-	if(iScaleHP == -1) {
+		
+	if (iScaleHP == -1)
 		iScaleHP = StringToInt(sScale);
-	}
-	if(iSize == -1.0) {
+		
+	if (iSize == -1.0)
 		iSize = StringToFloat(sSize);
-	}
-	/*if(!sGlowValue[0]) {
-		//empty string
-		Format(sGlowValue, sizeof(sGlowValue), "%s", sGlow);
-	}*/
-	if(strlen(sPosition) != 0 && !isCMD) {
+		
+	if (strlen(sPosition) != 0 && !isCMD)
+	{
 		char sPos[3][16];
 		ExplodeString(sPosition, ",", sPos, sizeof(sPos), sizeof(sPos[]));
+		
 		for(int i = 0; i < 3; i++)
 			temp[i] = StringToFloat(sPos[i]);
 	}
+	
 	temp[2] += StringToFloat(sPosFix);
 	int iMax = StringToInt(sHorde) <= 1 ? 1 : StringToInt(sHorde);
 	int playerCounter = GetClientCount(true);
 	int sHealth = (iBaseHP + iScaleHP*playerCounter)*(iMax != 1 ? 1 : 10);
 	DataPack dMax = new DataPack();
 	dMax.WriteCell(iMax);
-	for(int i = 0; i < iMax; i++) {
+	
+	for (int i = 0; i < iMax; i++)
+	{
 		int ent = CreateEntityByName(sType);
 		ArrayList dReference = new ArrayList();
 		dReference.Push(dMax);
@@ -896,7 +909,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		
 		SetEntProp		(ent, Prop_Data, "m_iHealth", 		sHealth);
 		SetEntProp		(ent, Prop_Data, "m_iMaxHealth", 	sHealth); 
-		SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		0);
+		//SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		0);
 		
 		//SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		StrEqual(sType, MONOCULUS) ? 5 : 0);
 		
@@ -915,14 +928,15 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		
 		DispatchKeyValue(model, "targetname", targetname);
 		
-		if(strlen(sModel) != 0) {
-			DispatchKeyValue(model, "model", sModel);
-		}
-		else {
+		if (strlen(sModel) != 0)
+			DispatchKeyValue(model, "model", sModel);	
+		else
+		{
 			char mModel[256];
 			GetEntPropString(ent, Prop_Data, "m_ModelName", mModel, sizeof(mModel));
 			DispatchKeyValue(model, "model", mModel);
 		}
+		
 		DispatchKeyValue(model, "solid", "0");
 		SetEntPropEnt(model, Prop_Send, "m_hOwnerEntity", ent);
 		SetEntProp(model, Prop_Send, "m_fEffects", EF_BONEMERGE|EF_NOSHADOW|EF_PARENT_ANIMATES);
@@ -930,7 +944,8 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		TeleportEntity(model, kpos, NULL_VECTOR, NULL_VECTOR);
 		DispatchSpawn(model);
 		
-		if(strlen(sColor) != 0) {
+		if (strlen(sColor) != 0)
+		{
 			if(StrEqual(sColor, "Red", false)) SetEntProp(model, Prop_Send, "m_nSkin", 0);
 			else if(StrEqual(sColor, "Blue", false)) SetEntProp(model, Prop_Send, "m_nSkin", 1);
 			else if(StrEqual(sColor, "Green", false)) SetEntProp(model, Prop_Send, "m_nSkin", 2);
@@ -940,31 +955,37 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		
 		SetVariantString("!activator");
 		AcceptEntityInput(model, "SetParent", ent, model, 0);
-		if(!StrEqual(sType, MONOCULUS)) {
+		
+		if (!StrEqual(sType, MONOCULUS))
+		{
 			SetVariantString("head"); 
 			AcceptEntityInput(model, "SetParentAttachment", ent, model, 0);
 		}
 		
-		if(!sGlowValue[0])
+		if (!sGlowValue[0])
 			SetGlow(ent, targetname, kpos, sGlow);
 		else
 			SetGlow(ent, targetname, kpos, sGlowValue);
 		
-		if(timed) 
+		if (timed) 
 			g_AutoBoss++;
 			
-		if(i == 0) {
+		if (i == 0)
+		{
 			DataPack hPack;
 			CreateDataTimer(1.0, RemoveTimerPrint, hPack, TIMER_REPEAT);
 			hPack.WriteCell(EntIndexToEntRef(ent));
 			hPack.WriteCell(StringToFloat(sLifetime));
 			hPack.WriteCell(index);
 		}
+		
 		DataPack jPack;
 		CreateDataTimer(1.0, RemoveTimer, jPack, TIMER_REPEAT);
 		jPack.WriteCell(EntIndexToEntRef(ent));
 		jPack.WriteCell(StringToFloat(sLifetime));
-		if(strlen(sHModel) != 0) {
+		
+		if (strlen(sHModel) != 0)
+		{
 			int hat = CreateEntityByName("prop_dynamic_override");
 			DispatchKeyValue(hat, "model", sHModel);
 			DispatchKeyValue(hat, "spawnflags", "256");
@@ -980,12 +1001,14 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			AcceptEntityInput(hat, "SetParent", model, hat, 0);
 			
 			//maintain the offset of hat to the center of head
-			if(!StrEqual(sType, MONOCULUS)) {
+			if (!StrEqual(sType, MONOCULUS))
+			{
 				SetVariantString("head");
 				AcceptEntityInput(hat, "SetParentAttachment", model, hat, 0);
 				SetVariantString("head");
 				AcceptEntityInput(hat, "SetParentAttachmentMaintainOffset", model, hat, 0);
 			}
+			
 			float hatpos[3];
 			hatpos[2] += StringToFloat(sHatPosFix);//*iSize; //-9.5*iSize
 			//hatpos[0] += -5.0;
@@ -993,32 +1016,37 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		}
 	}
 	
-	if(!StrEqual(sISound, "none", false)) {
+	if (!StrEqual(sISound, "none", false))
 		EmitSoundToAll(sISound, _, _, _, _, 1.0);
-	}
+		
 	ReplaceString(sName, sizeof(sName), "_", " ");
 	CPrintToChatAll("%t", "Boss_Spawn", sName);
 	
-	if(argIndex == 1) {
+	if (argIndex == 1)
 		gIndex = saveIndex;
-	}
 	
-	if(timed) {
+	if (timed)
+	{
 		gIndex++;
-		if(gIndex > gArray.Length-1) gIndex = 0;
+		if (gIndex > gArray.Length-1) 
+			gIndex = 0;
 	}
 }
 
-public Action RemoveTimer(Handle hTimer, DataPack jPack) {
+public Action RemoveTimer(Handle hTimer, DataPack jPack)
+{
 	jPack.Reset();
 	int ent = EntRefToEntIndex(jPack.ReadCell());
-	if(IsValidEntity(ent)) {
+	if (IsValidEntity(ent))
+	{
 		float tcounter = jPack.ReadCell();
-		if(tcounter <= 0.0) {
+		if (tcounter <= 0.0)
+		{
 			AcceptEntityInput(ent, "Kill");
 			return Plugin_Stop;
 		}
-		else {
+		else
+		{
 			tcounter -= 1.0;
 			jPack.Reset();
 			jPack.ReadCell();
@@ -1029,12 +1057,15 @@ public Action RemoveTimer(Handle hTimer, DataPack jPack) {
 	return Plugin_Stop;
 }
 
-public Action RemoveTimerPrint(Handle hTimer, DataPack hPack) {
+public Action RemoveTimerPrint(Handle hTimer, DataPack hPack)
+{
 	hPack.Reset();
 	int ent = EntRefToEntIndex(hPack.ReadCell());
-	if(IsValidEntity(ent)) {
+	if (IsValidEntity(ent))
+	{
 		float tcounter = hPack.ReadCell();
-		if(tcounter <= 0.0) {
+		if (tcounter <= 0.0)
+		{
 			int index = hPack.ReadCell();
 			char sName[64];
 			StringMap HashMap = gArray.Get(index);
@@ -1042,7 +1073,8 @@ public Action RemoveTimerPrint(Handle hTimer, DataPack hPack) {
 			CPrintToChatAll("%t", "Boss_Left", sName);
 			return Plugin_Stop;
 		}
-		else {
+		else
+		{
 			tcounter -= 1.0;
 			hPack.Reset();
 			hPack.ReadCell();
@@ -1054,63 +1086,68 @@ public Action RemoveTimerPrint(Handle hTimer, DataPack hPack) {
 }
 
 //Instead of hooking to sdkhook_takedamage, we use a 0.5 timer because of hud overloading when taking damage
-public Action HealthTimer(Handle hTimer, any ref) {
-	if(g_cHealthbar.IntValue == 0 || g_cHealthbar.IntValue == 1) {
+public Action HealthTimer(Handle hTimer, any ref)
+{
+	if (g_cHealthbar.IntValue == 0 || g_cHealthbar.IntValue == 1)
 		return Plugin_Continue;
-	}
-	if(gTrack != -1 && IsValidEntity(gTrack)) {
+		
+	if (gTrack != -1 && IsValidEntity(gTrack))
+	{
 		int HP = GetEntProp(gTrack, Prop_Data, "m_iHealth");
 		int maxHP = GetEntProp(gTrack, Prop_Data, "m_iMaxHealth");
 		int currentHP = RoundFloat(HP - maxHP * 0.9);
 		
-		if(currentHP > maxHP*0.1*0.65) 
+		if (currentHP > maxHP*0.1*0.65) 
 			SetHudTextParams(0.46, 0.12, 0.5, 0, 255, 0, 255);
-		else if(maxHP*0.1*0.25 < currentHP < maxHP*0.1*0.65) 
+		else if (maxHP*0.1*0.25 < currentHP < maxHP*0.1*0.65) 
 			SetHudTextParams(0.46, 0.12, 0.5, 255, 255, 0, 255);
 		else 
 			SetHudTextParams(0.46, 0.12, 0.5, 255, 0, 0, 255);
 			
-		if(currentHP <= 0) 
+		if (currentHP <= 0) 
 		{
 			SetHudTextParams(0.46, 0.12, 0.5, 0, 0, 0, 0);
 			currentHP = 0;
 		}
 		
-		for(int i = 1; i <= MaxClients; i++)
-			if(IsClientInGame(i)) {
+		for (int i = 1; i <= MaxClients; i++)
+			if (IsClientInGame(i)) {
 				ShowHudText(i, -1, "HP: %d", currentHP);
 		}
 	}
 	return Plugin_Continue;
 }
 
-void RemoveExistingBoss() {
+void RemoveExistingBoss()
+{
 	int ent = -1;
 	
-	while((ent = FindEntityByClassname(ent, "headless_hatman")) != -1)
-		if(IsValidEntity(ent)) 
+	while ((ent = FindEntityByClassname(ent, "headless_hatman")) != -1)
+		if (IsValidEntity(ent)) 
 			AcceptEntityInput(ent, "Kill");
 			
-	while((ent = FindEntityByClassname(ent, "eyeball_boss")) != -1)
-		if(IsValidEntity(ent))
+	while ((ent = FindEntityByClassname(ent, "eyeball_boss")) != -1)
+		if (IsValidEntity(ent))
 			AcceptEntityInput(ent, "Kill");
 			
-	while((ent = FindEntityByClassname(ent, "merasmus")) != -1)
-		if(IsValidEntity(ent))
+	while ((ent = FindEntityByClassname(ent, "merasmus")) != -1)
+		if (IsValidEntity(ent))
 			AcceptEntityInput(ent, "Kill");
 			
-	while((ent = FindEntityByClassname(ent, "tf_zombie")) != -1)
-		if(IsValidEntity(ent))
+	while ((ent = FindEntityByClassname(ent, "tf_zombie")) != -1)
+		if (IsValidEntity(ent))
 			AcceptEntityInput(ent, "Kill");
 			
 	SetEntProp(gHPbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
 }
 
-void SetSize(float value, int ent) {
+void SetSize(float value, int ent)
+{
 	SetEntPropFloat(ent, Prop_Send, "m_flModelScale", value);
 }
 
-void SetGlow(int ent, const char[] targetname, float kpos[3], const char[] sGlowValue) {
+void SetGlow(int ent, const char[] targetname, float kpos[3], const char[] sGlowValue)
+{
 	int glow = CreateEntityByName("tf_glow");
 			
 	DispatchKeyValue(glow, "glowcolor", sGlowValue);
@@ -1125,7 +1162,8 @@ void SetGlow(int ent, const char[] targetname, float kpos[3], const char[] sGlow
 	AcceptEntityInput(glow, "Enable");
 }
 
-void ResizeHitbox(int entity, float fScale) {
+void ResizeHitbox(int entity, float fScale)
+{
 	float vecBossMin[3], vecBossMax[3];
 	GetEntPropVector(entity, Prop_Send, "m_vecMins", vecBossMin);
 	GetEntPropVector(entity, Prop_Send, "m_vecMaxs", vecBossMax);
@@ -1141,9 +1179,11 @@ void ResizeHitbox(int entity, float fScale) {
 	SetEntPropVector(entity, Prop_Send, "m_vecMins", vecScaledBossMin);
 	SetEntPropVector(entity, Prop_Send, "m_vecMaxs", vecScaledBossMax);
 }
+
 /* --------------------------------BOSS SPAWNING CORE---------------------------------*/
 
 /* ---------------------------------TIMER & HUD CORE----------------------------------*/
+
 public void CreateCountdownTimer()
 {
 	if (!gEnabled) 
@@ -1162,84 +1202,83 @@ public Action Timer_HUDCounter(Handle hTimer)
 			ShowHudText(i, -1, "Boss: %d seconds", g_iInterval);
 		}
 	}
+	
 	if (g_iInterval <= 0)
 	{
 		SpawnBoss();
 		cTimer = null;
 		return Plugin_Stop;
 	}
+	
 	g_iInterval--;
 	return Plugin_Continue;
 }
 
-void ResetTimer() {
-	//ClearTimer(cTimer);
+void ResetTimer()
+{
 	delete cTimer;
 	CreateCountdownTimer();
 	CPrintToChatAll("%t", "Time", g_cInterval.IntValue);
 }
+
 /* ---------------------------------TIMER & HUD CORE----------------------------------*/
 
 /* ---------------------------------ENTITY MANAGEMENT---------------------------------*/
-public void OnEntityCreated(int ent, const char[] classname) {
-	if(!gEnabled) return;
-	if(StrEqual(classname, "monster_resource")) {
-		gHPbar = ent;
-	}
-	else if((StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) 
-	|| StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON))) {
-		/* Too lazy to work on this
-		if(StrEqual(classname, SKELETON)) {
-			for(int i = 1; i <= MaxClients; i++) {
-				if(!IsClientInGame(i) || !IsPlayerAlive(i)) continue;
-				float btemp[3], itemp[3];
-				GetEntPropVector(ent, Prop_Send, "m_vecOrigin", btemp);
-				GetClientAbsOrigin(i, itemp);
-				float Distance = GetVectorDistance(btemp, itemp);
-				if(Distance <= 5000) {
-					int flags = GetCommandFlags("shake"); 
-					SetCommandFlags("shake", flags & ~FCVAR_CHEAT);
-					FakeClientCommand(i, "shake");	
-					SetCommandFlags("shake", flags | FCVAR_CHEAT);
-				}
-			}			
-		}*/
+
+public void OnEntityCreated(int ent, const char[] classname)
+{
+	if (!gEnabled)
+		return;
+		
+	if (StrEqual(classname, "monster_resource"))
+		gHPbar = ent;		
+	else if ((StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) || StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON)))
+	{
 		gTrack = ent;
 		SDKHook(ent, SDKHook_OnTakeDamagePost, OnBossDamaged);
 		RequestFrame(UpdateBossHealth, EntIndexToEntRef(ent));
 	}
-	else if(StrEqual(classname, "prop_dynamic")) {
+	else if (StrEqual(classname, "prop_dynamic"))
 		RequestFrame(OnPropSpawn, EntIndexToEntRef(ent));
-	}
 }
 
-public void OnEntityDestroyed(int ent) {
-	if(!gEnabled) return;
-	if(!IsValidEntity(ent)) return;
-	if(ent == gTrack) {
+public void OnEntityDestroyed(int ent)
+{
+	if (!gEnabled)
+		return;
+		
+	if (!IsValidEntity(ent)) 
+		return;
+		
+	if (ent == gTrack)
+	{
 		gTrack = -1;
-		for(int i = 0; i < 2048; i++) {
-			if(!IsValidEntity(i)) 
+		for (int i = 0; i < 2048; i++) 
+		{
+			if (!IsValidEntity(i)) 
 				continue;
-			if(i == ent)
+				
+			if (i == ent)
 				continue;
-			else {
+			else 
+			{
 				gTrack = i;
 				break;
 			}
 		}
-		if(gTrack != -1) {
+		if (gTrack != -1) 
 			SDKHook(gTrack, SDKHook_OnTakeDamagePost, OnBossDamaged);
-			//RequestFrame(UpdateBossHealth, EntIndexToEntRef(gTrack));
-		}
-		else {
+		else
 			SetEntProp(gHPbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
-		}
 	}
-	for(int i = gData.Length-1; i >= 0; i--) {
+	
+	for (int i = gData.Length-1; i >= 0; i--)
+	{
 		ArrayList dReference = gData.Get(i);
 		int dEnt = EntRefToEntIndex(dReference.Get(1));
-		if(ent == dEnt) {
+		
+		if (ent == dEnt)
+		{
 			DataPack dMax = dReference.Get(0);
 			dMax.Reset();
 			int iMax = dMax.ReadCell();
@@ -1250,20 +1289,22 @@ public void OnEntityDestroyed(int ent) {
 			dMax.WriteCell(iMax);
 			dReference.Set(0, dMax);
 			gData.Erase(i);
-			if(timed) {
+			
+			if (timed)
 				g_AutoBoss--;
-			}
-			if(iMax == 0) {
+				
+			if (iMax == 0)
+			{
 				StringMap HashMap = gArray.Get(index);
 				char sDSound[256];
 				HashMap.GetString("DeathSound", sDSound, sizeof(sDSound));
-				if(!StrEqual(sDSound, "none", false)) {
+				
+				if (!StrEqual(sDSound, "none", false))
 					EmitSoundToAll(sDSound, _, _, _, _, 1.0);
-				}
-				if(timed && GetClientCount(true) >= g_cMinplayers.IntValue && g_AutoBoss == 0) {
-					//CPrintToChatAll("%t", "Time", g_cInterval.IntValue);
+					
+				if (timed && GetClientCount(true) >= g_cMinplayers.IntValue && g_AutoBoss == 0)
 					ResetTimer();
-				}
+					
 				delete dMax;
 			}
 			delete dReference;
@@ -1272,27 +1313,39 @@ public void OnEntityDestroyed(int ent) {
 	}
 }
 
-public void OnPropSpawn(any ref) {
+public void OnPropSpawn(any ref)
+{
 	int ent = EntRefToEntIndex(ref);
-	if(!IsValidEntity(ent)) return;
+	
+	if (!IsValidEntity(ent)) 
+		return;
+		
 	int parent = GetEntPropEnt(ent, Prop_Data, "m_pParent");
-	if(!IsValidEntity(parent)) return;
+	
+	if (!IsValidEntity(parent)) 
+		return;
+		
 	char strClassname[64];
 	GetEntityClassname(parent, strClassname, sizeof(strClassname));
-	if(StrEqual(strClassname, HORSEMAN, false)) {
-		for(int i = gData.Length-1; i >= 0; i--) {
+	if (StrEqual(strClassname, HORSEMAN, false))
+	{
+		for (int i = gData.Length-1; i >= 0; i--)
+		{
 			ArrayList dReference = gData.Get(i);
 			int dEnt = EntRefToEntIndex(dReference.Get(1));
 			int dIndex = dReference.Get(2);
-			if(parent == dEnt) {
+			
+			if (parent == dEnt)
+			{
 				char sWModel[256];
 				StringMap HashMap = gArray.Get(dIndex);
 				HashMap.GetString("WeaponModel", sWModel, sizeof(sWModel));
-				if(strlen(sWModel) != 0) {
-					if(StrEqual(sWModel, "Invisible")) {
+				if (strlen(sWModel) != 0)
+				{
+					if (StrEqual(sWModel, "Invisible"))
 						SetEntityModel(ent, "");
-					}
-					else {
+					else
+					{
 						SetEntityModel(ent, sWModel);
 						SetEntPropEnt(parent, Prop_Send, "m_hActiveWeapon", ent);
 					}
@@ -1303,34 +1356,46 @@ public void OnPropSpawn(any ref) {
 	}
 }
 
-void FindHealthBar() {
+void FindHealthBar()
+{
 	gHPbar = FindEntityByClassname(-1, "monster_resource");
-	if(gHPbar == -1) {
+	
+	if (gHPbar == -1)
+	{
 		gHPbar = CreateEntityByName("monster_resource");
-		if(gHPbar != -1) {
+		
+		if (gHPbar != -1)
 			DispatchSpawn(gHPbar);
-		}
 	}
 }
 
-public Action OnBossDamaged(int victim, int &attacker, int &inflictor, float &damage, int &damagetype) {
+public Action OnBossDamaged(int victim, int &attacker, int &inflictor, float &damage, int &damagetype)
+{
 	UpdateBossHealth(victim);
 }
 
-public Action OnClientDamaged(int victim, int &attacker, int &inflictor, float &damage, int &damagetype) {
-	if(!IsClientInGame(victim)) 
+public Action OnClientDamaged(int victim, int &attacker, int &inflictor, float &damage, int &damagetype)
+{
+	if (!IsClientInGame(victim)) 
 		return Plugin_Continue;
-	if(!IsValidEntity(attacker)) 
+		
+	if (!IsValidEntity(attacker)) 
 		return Plugin_Continue;
+		
 	char classname[32];
 	GetEntityClassname(attacker, classname, sizeof(classname));
-	if(StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) || StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON)) {
+	
+	if (StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) || StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON))
+	{
 		char sDamage[32];
-		for(int i = gData.Length-1; i >= 0; i--) {
+		for (int i = gData.Length-1; i >= 0; i--)
+		{
 			ArrayList dReference = gData.Get(i);
 			int dEnt = EntRefToEntIndex(dReference.Get(1));
 			int dIndex = dReference.Get(2);
-			if(attacker == dEnt) {
+			
+			if (attacker == dEnt)
+			{
 				StringMap HashMap = gArray.Get(dIndex);
 				HashMap.GetString("Damage", sDamage, sizeof(sDamage));
 				damage = StringToFloat(sDamage);
@@ -1343,33 +1408,33 @@ public Action OnClientDamaged(int victim, int &attacker, int &inflictor, float &
 
 public void UpdateBossHealth(int ent) 
 {
-	if(gHPbar == -1 || g_cHealthbar.IntValue == 0 || g_cHealthbar.IntValue == 2)
+	if (gHPbar == -1 || g_cHealthbar.IntValue == 0 || g_cHealthbar.IntValue == 2)
 		return;
 		
 	int percentage;
-	if(IsValidEntity(ent)) 
+	if (IsValidEntity(ent)) 
 	{
 		int HP = GetEntProp(ent, Prop_Data, "m_iHealth");
 		int maxHP = GetEntProp(ent, Prop_Data, "m_iMaxHealth");
 		float currentHP = HP - maxHP * 0.9;
-		if(currentHP <= 0.0) 
+		if (currentHP <= 0.0) 
 		{
 			percentage = 0;
 			char classname[32];
 			GetEntityClassname(ent, classname, sizeof(classname));
-			if(StrEqual(classname, SKELETON))
+			if (StrEqual(classname, SKELETON))
 			{
-				for(int i = gData.Length-1; i >= 0; i--)
+				for (int i = gData.Length-1; i >= 0; i--)
 				{
 					ArrayList dReference = gData.Get(i);
 					int dEnt = EntRefToEntIndex(dReference.Get(1));
-					if(ent == dEnt) 
+					if (ent == dEnt) 
 					{
 						int dIndex = dReference.Get(2);
 						char sGnome[8];
 						StringMap HashMap = gArray.Get(dIndex);
 						HashMap.GetString("Gnome", sGnome, sizeof(sGnome));
-						if(StringToInt(sGnome) == 0)
+						if (StringToInt(sGnome) == 0)
 							AcceptEntityInput(ent, "kill");
 							
 						break;
@@ -1380,7 +1445,7 @@ public void UpdateBossHealth(int ent)
 			{
 				SetEntProp(ent, Prop_Data, "m_iHealth", 0);
 			
-				if(HP <= -1)
+				if (HP <= -1)
 					SetEntProp(ent, Prop_Data, "m_takedamage", 0);
 			}
 		}
@@ -1408,18 +1473,22 @@ void SetMerasmusLifetime(int duration)
 /* ---------------------------------CALL FUNCTIONS------------------------------------*/
 
 /* ---------------------------------CONFIG MANAGEMENT---------------------------------*/
-public void SetupMapConfigs(const char[] sFile) {
+public void SetupMapConfigs(const char[] sFile)
+{
 	char sPath[PLATFORM_MAX_PATH];
 	BuildPath(Path_SM, sPath, sizeof(sPath), "configs/%s", sFile);
 	
-	if(!FileExists(sPath)) {
+	if (!FileExists(sPath))
+	{
 		LogError("[Boss] Error: Can not find map filepath %s", sPath);
 		SetFailState("[Boss] Error: Can not find map filepath %s", sPath);
 	}
+	
 	KeyValues kv = CreateKeyValues("Boss Spawner Map");
 	FileToKeyValues(kv, sPath);
 
-	if(!KvGotoFirstSubKey(kv)) {
+	if (!KvGotoFirstSubKey(kv))
+	{
 		LogError("[Boss] Could not read maps file: %s", sPath);
 		SetFailState("[Boss] Could not read maps file: %s", sPath);
 	}
@@ -1430,9 +1499,12 @@ public void SetupMapConfigs(const char[] sFile) {
 	float temp_pos[3];
 	char requestMap[64], currentMap[64], sPosition[64], tPosition[64];
 	GetCurrentMap(currentMap, sizeof(currentMap));
-	do {
+	
+	do 
+	{
 		kv.GetSectionName(requestMap, sizeof(requestMap));
-		if(StrEqual(requestMap, currentMap, false)) {
+		if (StrEqual(requestMap, currentMap, false))
+		{
 			mapEnabled = kv.GetNum("Enabled", 0);
 			gPos[0] = kv.GetFloat("Position X", 0.0);
 			gPos[1] = kv.GetFloat("Position Y", 0.0);
@@ -1440,7 +1512,8 @@ public void SetupMapConfigs(const char[] sFile) {
 			kv.GetString("TeleportPosition", sPosition, sizeof(sPosition), SNULL);
 			Default = true;
 		}
-		else if(StrEqual(requestMap, "Default", false)) {
+		else if (StrEqual(requestMap, "Default", false))
+		{
 			tempEnabled = kv.GetNum("Enabled", 0);
 			temp_pos[0] = kv.GetFloat("Position X", 0.0);
 			temp_pos[1] = kv.GetFloat("Position Y", 0.0);
@@ -1449,30 +1522,39 @@ public void SetupMapConfigs(const char[] sFile) {
 		}
 	} while kv.GotoNextKey();
 	delete kv;
-	if(Default == false) {
+	
+	if (Default == false)
+	{
 		mapEnabled = tempEnabled;
 		gPos = temp_pos;
 		Format(sPosition, sizeof(sPosition), "%s", tPosition);
 	}
+	
 	float tpos[3];
-	if(strlen(sPosition) != 0) {
+	if (strlen(sPosition) != 0)
+	{
 		int ent;
-		while((ent = FindEntityByClassname(ent, "info_target")) != -1) {
-			if(IsValidEntity(ent)) {
+		while ((ent = FindEntityByClassname(ent, "info_target")) != -1)
+		{
+			if (IsValidEntity(ent))
+			{
 				char strName[32];
 				GetEntPropString(ent, Prop_Data, "m_iName", strName, sizeof(strName));
-				if(StrContains(strName, "spawn_loot") != -1) {
+				if (StrContains(strName, "spawn_loot") != -1)
+				{
 					AcceptEntityInput(ent, "Kill");
 				}
 			}
 		}
+		
 		char sPos[3][16];
 		ExplodeString(sPosition, ",", sPos, sizeof(sPos), sizeof(sPos[]));
 		tpos[0] = StringToFloat(sPos[0]);
 		tpos[1] = StringToFloat(sPos[1]);
 		tpos[2] = StringToFloat(sPos[2]);
 		
-		for(int i = 0; i < 4; i++) {
+		for (int i = 0; i < 4; i++)
+		{
 			ent = CreateEntityByName("info_target");
 			char spawn_name[16];
 			Format(spawn_name, sizeof(spawn_name), "%s", i == 0 ? "spawn_loot" : (i == 1 ? "spawn_loot_red" : (i == 2 ? "spawn_loot_blue" : "spawn_boss_alt")));
@@ -1481,39 +1563,47 @@ public void SetupMapConfigs(const char[] sFile) {
 			DispatchSpawn(ent);
 		}
 	}
-	if(mapEnabled != 0) {
+	if (mapEnabled != 0)
+	{
 		gEnabled = true;
-		if(GetClientCount(true) >= g_cMinplayers.IntValue) {
+		if (GetClientCount(true) >= g_cMinplayers.IntValue)
+		{
 			CreateCountdownTimer();
 			CPrintToChatAll("%t", "Time", g_cInterval.IntValue);
 		}
 	}
-	else if(mapEnabled == 0) {
+	else if (mapEnabled == 0)
 		gEnabled = false;
-	}
+		
 	LogMessage("Loaded Map configs successfully."); 
 }
 
-public void SetupBossConfigs(const char[] sFile) {
+public void SetupBossConfigs(const char[] sFile)
+{
 	char sPath[PLATFORM_MAX_PATH];
 	BuildPath(Path_SM, sPath, sizeof(sPath), "configs/%s", sFile);
 	
-	if(!FileExists(sPath)) {
+	if (!FileExists(sPath))
+	{
 		LogError("[Boss] Error: Can not find map filepath %s", sPath);
 		SetFailState("[Boss] Error: Can not find map filepath %s", sPath);
 	}
+	
 	Handle kv = CreateKeyValues("Custom Boss Spawner");
 	FileToKeyValues(kv, sPath);
 
-	if(!KvGotoFirstSubKey(kv)) {
+	if (!KvGotoFirstSubKey(kv)) {
 		LogError("[Boss] Could not read maps file: %s", sPath);
 		SetFailState("[Boss] Could not read maps file: %s", sPath);
 	}
+	
 	gArray.Clear();
 	char sName[64], sModel[256], sType[32], sBase[16], sScale[16], sWModel[256], sSize[16], sGlow[32], sPosFix[32];
 	char sLifetime[32], sPosition[32], sHorde[8], sColor[16], sISound[256], sDSound[256], sHModel[256], sGnome[8];
 	char sHatPosFix[32], sHatSize[16], sDamage[32];
-	do {
+	
+	do
+	{
 		KvGetSectionName(kv, sName, sizeof(sName));
 		KvGetString(kv, "Model", sModel, sizeof(sModel), SNULL);
 		KvGetString(kv, "Type", sType, sizeof(sType));
@@ -1535,58 +1625,70 @@ public void SetupBossConfigs(const char[] sFile) {
 		KvGetString(kv, "HatSize", sHatSize, sizeof(sHatSize), "1.0");
 		KvGetString(kv, "Damage", sDamage, sizeof(sDamage), "100.0");
 		
-		if(StrContains(sName, " ") != -1) {
+		if (StrContains(sName, " ") != -1)
+		{
 			LogError("[Boss] Boss name should not have spaces, please replace spaces with _");
 			SetFailState("[Boss] Boss name should not have spaces, please replace spaces with _");
 		}
-		if(!StrEqual(sType, HORSEMAN) && !StrEqual(sType, MONOCULUS) && !StrEqual(sType, MERASMUS) && !StrEqual(sType, SKELETON)){
+		
+		if (!StrEqual(sType, HORSEMAN) && !StrEqual(sType, MONOCULUS) && !StrEqual(sType, MERASMUS) && !StrEqual(sType, SKELETON))
+		{
 			LogError("[Boss] Type is undetermined, please check boss type again.");
 			SetFailState("[Boss] Type is undetermined, please check boss type again.");
 		}
-		if(!StrEqual(sType, SKELETON)) {
-			if(!StrEqual(sHorde, "1")) {
+		if (!StrEqual(sType, SKELETON))
+		{
+			if (!StrEqual(sHorde, "1"))
+			{
 				LogError("[Boss] Horde mode only works for Type: tf_zombie.");
 				SetFailState("[Boss] Horde mode only works for Type: tf_zombie.");
 			}
-			if(strlen(sColor) != 0) {
+			if (strlen(sColor) != 0)
+			{
 				LogError("[Boss] Color mode only works for Type: tf_zombie.");
 				SetFailState("[Boss] Color mode only works for Type: tf_zombie.");
 			}
-			if(!StrEqual(sGnome, "0")) {
+			if (!StrEqual(sGnome, "0"))
+			{
 				LogError("[Boss] Gnome only works for Type: tf_zombie.");
 				SetFailState("[Boss] Gnome only works for Type: tf_zombie.");
 			}
 		}
-		if(StrEqual(sType, MONOCULUS)) {
+		if (StrEqual(sType, MONOCULUS))
+		{
 			SetEyeballLifetime(9999999);
-			if(strlen(sModel) != 0)
+			if (strlen(sModel) != 0)
 			{
 				LogError("[Boss] Can not apply custom model to monoculus.");
 				SetFailState("[Boss] Can not apply custom model to monoculus.");
 			}
 		}
-		else if(StrEqual(sType, MERASMUS)) {
+		if (StrEqual(sType, MERASMUS))
 			SetMerasmusLifetime(9999999);
-		}
-		if(!StrEqual(sType, HORSEMAN)) {
-			if(strlen(sWModel) != 0) {
+			
+		if (!StrEqual(sType, HORSEMAN))
+		{
+			if (strlen(sWModel) != 0)
+			{
 				LogError("[Boss] Weapon model can only be changed on Type:headless_hatman");
 				SetFailState("[Boss] Weapon model can only be changed on Type:headless_hatman");
 			}
 		}
-		else if(strlen(sWModel) != 0) {
-			if(!StrEqual(sWModel, "Invisible")) {
+		else if (strlen(sWModel) != 0)
+		{
+			if(!StrEqual(sWModel, "Invisible"))
 				PrecacheModel(sWModel, true);
-			}
 		}
-		if(strlen(sModel) != 0) {
+		
+		if (strlen(sModel) != 0)
 			PrecacheModel(sModel, true);
-		}
-		if(strlen(sHModel) != 0) {
+			
+		if (strlen(sHModel) != 0)
 			PrecacheModel(sHModel, true);
-		}
+			
 		PrecacheSound(sISound);
 		PrecacheSound(sDSound);
+		
 		StringMap HashMap = new StringMap();
 		HashMap.SetString("Name", sName, false);
 		HashMap.SetString("Model", sModel, false);
@@ -1609,55 +1711,71 @@ public void SetupBossConfigs(const char[] sFile) {
 		HashMap.SetString("HatSize", sHatSize, false);
 		HashMap.SetString("Damage", sDamage, false);
 		gArray.Push(HashMap);
+		
 		char command[64];
 		Format(command, sizeof(command), "sm_%s", sName);
 		AddCommandListener(SpawnBossCommand, command);
 	} while (KvGotoNextKey(kv));
+	
 	delete kv;
 	LogMessage("[Boss] Custom Boss Spawner Configuration has loaded successfully."); 
 }
 
-public void SetupDownloads(const char[] sFile) {
+public void SetupDownloads(const char[] sFile)
+{
 	char sPath[PLATFORM_MAX_PATH];
 	BuildPath(Path_SM, sPath, sizeof(sPath), "configs/%s", sFile);
 	
-	if(!FileExists(sPath)) {
+	if (!FileExists(sPath))
+	{
 		LogError("[Boss] Error: Can not find download file %s", sPath);
 		SetFailState("[Boss] Error: Can not find download file %s", sPath);
 	}
+	
 	File file = OpenFile(sPath, "r");
 	char buffer[256], fName[128], fPath[256];
-	while(!file.EndOfFile() && file.ReadLine(buffer, sizeof(buffer))) {
+	while (!file.EndOfFile() && file.ReadLine(buffer, sizeof(buffer)))
+	{
 		int i = -1;
 		i = FindCharInString(buffer, '\n', true);
-		if(i != -1) buffer[i] = '\0';
+		
+		if(i != -1) 
+			buffer[i] = '\0';
+			
 		TrimString(buffer);
-		if(!DirExists(buffer)) {
+		
+		if (!DirExists(buffer))
+		{
 			LogError("[Boss] Error: '%s' directory can not be found.", buffer);
 			SetFailState("[Boss] Error: '%s' directory can not be found.", buffer);
 		}
+		
 		int isMaterial = 0;
-		if(StrContains(buffer, "materials/", true) != -1 || StrContains(buffer, "materials\\", true) != -1) {
+		if (StrContains(buffer, "materials/", true) != -1 || StrContains(buffer, "materials\\", true) != -1)
 			isMaterial = 1;
-		}
+			
 		DirectoryListing sDir = OpenDirectory(buffer, true);
-		while(sDir.GetNext(fName, sizeof(fName))) {
-			if(StrEqual(fName, ".") || StrEqual(fName, "..")) 
+		while (sDir.GetNext(fName, sizeof(fName)))
+		{
+			if (StrEqual(fName, ".") || StrEqual(fName, "..")) 
 				continue;
-			if(StrContains(fName, ".ztmp") != -1) 
+			if (StrContains(fName, ".ztmp") != -1) 
 				continue;
-			if(StrContains(fName, ".bz2") != -1)
+			if (StrContains(fName, ".bz2") != -1)
 				continue;
+				
 			Format(fPath, sizeof(fPath), "%s/%s", buffer, fName);
 			AddFileToDownloadsTable(fPath);
-			if(isMaterial == 1) 
+			
+			if (isMaterial == 1) 
 				continue;
-			if(StrContains(fName, ".vtx") != -1)
+			if (StrContains(fName, ".vtx") != -1)
 				continue;
-			if(StrContains(fName, ".vvd") != -1)
+			if (StrContains(fName, ".vvd") != -1)
 				continue;
-			if(StrContains(fName, ".phy") != -1)
+			if (StrContains(fName, ".phy") != -1)
 				continue;
+				
 			PrecacheGeneric(fPath, true);
 		}
 		delete sDir;
