@@ -1120,22 +1120,17 @@ public Action HealthTimer(Handle hTimer, any ref)
 
 void RemoveExistingBoss()
 {
-	int ent = -1;
-	
+	int ent;
 	while ((ent = FindEntityByClassname(ent, "headless_hatman")) != -1)
-		if (IsValidEntity(ent)) 
-			AcceptEntityInput(ent, "Kill");
+		AcceptEntityInput(ent, "Kill");
 			
 	while ((ent = FindEntityByClassname(ent, "eyeball_boss")) != -1)
-		if (IsValidEntity(ent))
-			AcceptEntityInput(ent, "Kill");
+		AcceptEntityInput(ent, "Kill");
 			
 	while ((ent = FindEntityByClassname(ent, "merasmus")) != -1)
-		if (IsValidEntity(ent))
-			AcceptEntityInput(ent, "Kill");
+		AcceptEntityInput(ent, "Kill");
 			
 	while ((ent = FindEntityByClassname(ent, "tf_zombie")) != -1)
-		if (IsValidEntity(ent))
 			AcceptEntityInput(ent, "Kill");
 			
 	SetEntProp(gHPbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
