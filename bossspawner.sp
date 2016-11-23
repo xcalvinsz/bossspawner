@@ -15,9 +15,10 @@ Version Log:
 ~ Next version
 	- Properly use FindConvar instead of ServerCommand to execute convars ("tf_eyeball_boss_lifetime" and "tf_merasmus_lifetime").
 	- Changed a bad attempt at managing convars ("tf_eyeball_boss_lifetime" and "tf_merasmus_lifetime"), plugin will now instead just set those values to 9999999 and default values when unloaded.
-	- Updated some syntax and code clean up
 	- No longer caches values from convars (convars.IntValue is already cached)
 	- No longer need to unhook sdkhook on client disconnect
+	- Fixed a bug where round start would make the next boss timer to disappear
+	- Updated some syntax and code clean up
 	- Optimization of code
 	- General code cleanup
 
@@ -139,7 +140,7 @@ public void OnPluginStart()
 	
 	RegConsoleCmd("sm_voteboss", VoteBoss, "Start a vote, needs minimum amount of people to run this command to start a vote.  Follows sm_boss_vote");
 	
-	HookEvent("teamplay_round_start", 			RoundStart, 	EventHookMode_Pre);
+	HookEvent("teamplay_round_start", 			RoundStart,		EventHookMode_Pre);
 	HookEvent("pumpkin_lord_summoned", 			Boss_Summoned, 	EventHookMode_Pre);
 	HookEvent("eyeball_boss_summoned", 			Boss_Summoned, 	EventHookMode_Pre);
 	HookEvent("merasmus_summoned", 				Boss_Summoned, 	EventHookMode_Pre);
@@ -258,11 +259,12 @@ public Action RoundStart(Event event, const char[] name, bool dontBroadcast)
 	if (!gEnabled)
 		return Plugin_Continue;
 	
-	if (GetClientCount(true) >= g_cMinplayers.IntValue)
-		if(g_AutoBoss == 0)
-			ResetTimer();
-			
 	delete cTimer;
+	
+	if (GetClientCount(true) >= g_cMinplayers.IntValue)
+	{
+		ResetTimer();
+	}
 	return Plugin_Continue;
 }
 
@@ -1719,7 +1721,7 @@ public void SetupBossConfigs(const char[] sFile)
 	} while (KvGotoNextKey(kv));
 	
 	delete kv;
-	LogMessage("[Boss] Custom Boss Spawner Configuration has loaded successfully."); 
+	LogMessage("Custom Boss Spawner Configuration has loaded successfully."); 
 }
 
 public void SetupDownloads(const char[] sFile)
