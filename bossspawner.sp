@@ -1405,52 +1405,51 @@ public void UpdateBossHealth(int ent)
 {
 	if (gHPbar == -1 || g_cHealthbar.IntValue == 0 || g_cHealthbar.IntValue == 2)
 		return;
-		
-	int percentage;
-	if (IsValidEntity(ent)) 
+	
+	if (!IsValidEntity(ent))
 	{
-		int HP = GetEntProp(ent, Prop_Data, "m_iHealth");
-		int maxHP = GetEntProp(ent, Prop_Data, "m_iMaxHealth");
-		float currentHP = HP - maxHP * 0.9;
-		if (currentHP <= 0.0) 
+		SetEntProp(gHPbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
+		return;
+	}
+	
+	int HP = GetEntProp(ent, Prop_Data, "m_iHealth");
+	int maxHP = GetEntProp(ent, Prop_Data, "m_iMaxHealth");
+	float currentHP = HP - maxHP * 0.9;
+	
+	if (currentHP > 0.0)
+	{
+		SetEntProp(gHPbar, Prop_Send, "m_iBossHealthPercentageByte", RoundToCeil((float(HP) / float(maxHP / 10)) * 255.9));
+		return;
+	}
+	
+	char classname[32];
+	GetEntityClassname(ent, classname, sizeof(classname));
+	
+	if (StrEqual(classname, SKELETON))
+	{
+		for (int i = gData.Length-1; i >= 0; i--)
 		{
-			percentage = 0;
-			char classname[32];
-			GetEntityClassname(ent, classname, sizeof(classname));
-			if (StrEqual(classname, SKELETON))
+			ArrayList dReference = gData.Get(i);
+			int dEnt = EntRefToEntIndex(dReference.Get(1));
+			if (ent == dEnt) 
 			{
-				for (int i = gData.Length-1; i >= 0; i--)
-				{
-					ArrayList dReference = gData.Get(i);
-					int dEnt = EntRefToEntIndex(dReference.Get(1));
-					if (ent == dEnt) 
-					{
-						int dIndex = dReference.Get(2);
-						char sGnome[8];
-						StringMap HashMap = gArray.Get(dIndex);
-						HashMap.GetString("Gnome", sGnome, sizeof(sGnome));
-						if (StringToInt(sGnome) == 0)
-							AcceptEntityInput(ent, "kill");
-							
-						break;
-					}
-				}
-			}
-			else
-			{
-				SetEntProp(ent, Prop_Data, "m_iHealth", 0);
-			
-				if (HP <= -1)
-					SetEntProp(ent, Prop_Data, "m_takedamage", 0);
+				int dIndex = dReference.Get(2);
+				char sGnome[8];
+				StringMap HashMap = gArray.Get(dIndex);
+				HashMap.GetString("Gnome", sGnome, sizeof(sGnome));
+				if (StringToInt(sGnome) == 0)
+					AcceptEntityInput(ent, "kill");
+				break;
 			}
 		}
-		else
-			percentage = RoundToCeil((float(HP) / float(maxHP / 10)) * 255.9);	//max 255.9 accurate at 100%
 	}
 	else
-		percentage = 0;
-		
-	SetEntProp(gHPbar, Prop_Send, "m_iBossHealthPercentageByte", percentage);
+	{
+		if (HP <= -1)
+			SetEntProp(ent, Prop_Data, "m_takedamage", 0);
+		SetEntProp(ent, Prop_Data, "m_iHealth", 0);
+	}
+	SetEntProp(gHPbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
 }
 
 /* ---------------------------------ENTITY MANAGEMENT---------------------------------*/
@@ -1580,16 +1579,16 @@ public void SetupBossConfigs(const char[] sFile)
 	
 	if (!FileExists(sPath))
 	{
-		LogError("[Boss] Error: Can not find map filepath %s", sPath);
-		SetFailState("[Boss] Error: Can not find map filepath %s", sPath);
+		LogError("[CBS] Error: Can not find map filepath %s", sPath);
+		SetFailState("[CBS] Error: Can not find map filepath %s", sPath);
 	}
 	
 	Handle kv = CreateKeyValues("Custom Boss Spawner");
 	FileToKeyValues(kv, sPath);
 
 	if (!KvGotoFirstSubKey(kv)) {
-		LogError("[Boss] Could not read maps file: %s", sPath);
-		SetFailState("[Boss] Could not read maps file: %s", sPath);
+		LogError("[CBS] Could not read maps file: %s", sPath);
+		SetFailState("[CBS] Could not read maps file: %s", sPath);
 	}
 	
 	gArray.Clear();
@@ -1622,63 +1621,70 @@ public void SetupBossConfigs(const char[] sFile)
 		
 		if (StrContains(sName, " ") != -1)
 		{
-			LogError("[Boss] Boss name should not have spaces, please replace spaces with _");
-			SetFailState("[Boss] Boss name should not have spaces, please replace spaces with _");
+			LogError("[CBS] Error: Boss names should not have spaces, please replace spaces with underscore '_'");
+			SetFailState("[CBS] Error: Boss names should not have spaces, please replace spaces with underscore '_'");
 		}
 		
-		if (!StrEqual(sType, HORSEMAN) && !StrEqual(sType, MONOCULUS) && !StrEqual(sType, MERASMUS) && !StrEqual(sType, SKELETON))
+		bool bHorseman = StrEqual(sType, HORSEMAN);
+		bool bMonoculus = StrEqual(sType, MONOCULUS);
+		bool bMerasmus = StrEqual(sType, MERASMUS);
+		bool bSkeleton = StrEqual(sType, SKELETON);
+		
+		if (!bHorseman && !bMonoculus && !bMerasmus && !bSkeleton)
 		{
-			LogError("[Boss] Type is undetermined, please check boss type again.");
-			SetFailState("[Boss] Type is undetermined, please check boss type again.");
+			LogError("[CBS] Boss type is undetermined, please check the boss type spelling again.");
+			SetFailState("[CBS] Boss type is undetermined, please check the boss type spelling again.");
 		}
-		if (!StrEqual(sType, SKELETON))
+		
+		if (!bSkeleton)
 		{
 			if (!StrEqual(sHorde, "1"))
 			{
-				LogError("[Boss] Horde mode only works for Type: tf_zombie.");
-				SetFailState("[Boss] Horde mode only works for Type: tf_zombie.");
+				LogError("[CBS] Horde mode only works for boss type: tf_zombie.");
+				SetFailState("[CBS] Horde mode only works for boss type: tf_zombie.");
 			}
-			if (strlen(sColor) != 0)
+			if (strlen(sColor))
 			{
-				LogError("[Boss] Color mode only works for Type: tf_zombie.");
-				SetFailState("[Boss] Color mode only works for Type: tf_zombie.");
+				LogError("[CBS] Color mode only works for boss type: tf_zombie.");
+				SetFailState("[CBS] Color mode only works for boss type: tf_zombie.");
 			}
 			if (!StrEqual(sGnome, "0"))
 			{
-				LogError("[Boss] Gnome only works for Type: tf_zombie.");
-				SetFailState("[Boss] Gnome only works for Type: tf_zombie.");
+				LogError("[CBS] Gnome only works for boss type: tf_zombie.");
+				SetFailState("[CBS] Gnome only works for boss type: tf_zombie.");
 			}
-		}
-		if (StrEqual(sType, MONOCULUS))
-		{
-			SetEyeballLifetime(9999999);
-			if (strlen(sModel) != 0)
-			{
-				LogError("[Boss] Can not apply custom model to monoculus.");
-				SetFailState("[Boss] Can not apply custom model to monoculus.");
-			}
-		}
-		if (StrEqual(sType, MERASMUS))
-			SetMerasmusLifetime(9999999);
-			
-		if (!StrEqual(sType, HORSEMAN))
-		{
-			if (strlen(sWModel) != 0)
-			{
-				LogError("[Boss] Weapon model can only be changed on Type:headless_hatman");
-				SetFailState("[Boss] Weapon model can only be changed on Type:headless_hatman");
-			}
-		}
-		else if (strlen(sWModel) != 0)
-		{
-			if(!StrEqual(sWModel, "Invisible"))
-				PrecacheModel(sWModel, true);
 		}
 		
-		if (strlen(sModel) != 0)
+		if (bMonoculus)
+		{
+			SetEyeballLifetime(9999999);
+			if (strlen(sModel))
+			{
+				LogError("[CBS] Can not apply custom model to monoculus.");
+				SetFailState("[CBS] Can not apply custom model to monoculus.");
+			}
+		}
+		
+		if (bMerasmus)
+			SetMerasmusLifetime(9999999);
+		
+		if (strlen(sWModel))
+		{
+			if (!bHorseman)
+			{
+				LogError("[CBS] Weapon model can only be changed on boss type: headless_hatman");
+				SetFailState("[CBS] Weapon model can only be changed on boss type: headless_hatman");
+			}
+			else if (!StrEqual(sWModel, "Invisible"))
+			{
+				PrecacheModel(sWModel, true);
+			}
+		}
+		
+		if (strlen(sModel))
 			PrecacheModel(sModel, true);
 			
-		if (strlen(sHModel) != 0)
+		if (strlen(sHModel))
 			PrecacheModel(sHModel, true);
 			
 		PrecacheSound(sISound);
