@@ -920,49 +920,60 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		//SetEntPropFloat	(ent, Prop_Data, "m_flSpeed", 	0.0);
 		
 		//SetEntityModel(ent, sModel);
-		//Make the boss invisible and place a model over it to bonemerge
-		//Uses new glow entity tf_glow to change glow colors
-		SetEntProp(ent, Prop_Send, "m_fEffects", EF_NODRAW);
 		
-		int model = CreateEntityByName("prop_dynamic_override");
+		int attach = ent;
 		char targetname[128];
 		Format(targetname, sizeof(targetname), "%s%d", sName, GetRandomInt(2000, 10000));
-		
-		DispatchKeyValue(model, "targetname", targetname);
-		
-		if (strlen(sModel) != 0)
-			DispatchKeyValue(model, "model", sModel);	
-		else
-		{
-			char mModel[256];
-			GetEntPropString(ent, Prop_Data, "m_ModelName", mModel, sizeof(mModel));
-			DispatchKeyValue(model, "model", mModel);
-		}
-		
-		DispatchKeyValue(model, "solid", "0");
-		SetEntPropEnt(model, Prop_Send, "m_hOwnerEntity", ent);
-		SetEntProp(model, Prop_Send, "m_fEffects", EF_BONEMERGE|EF_NOSHADOW|EF_PARENT_ANIMATES);
-		
-		TeleportEntity(model, kpos, NULL_VECTOR, NULL_VECTOR);
-		DispatchSpawn(model);
-		
-		if (strlen(sColor) != 0)
-		{
-			if(StrEqual(sColor, "Red", false)) SetEntProp(model, Prop_Send, "m_nSkin", 0);
-			else if(StrEqual(sColor, "Blue", false)) SetEntProp(model, Prop_Send, "m_nSkin", 1);
-			else if(StrEqual(sColor, "Green", false)) SetEntProp(model, Prop_Send, "m_nSkin", 2);
-			else if(StrEqual(sColor, "Yellow", false)) SetEntProp(model, Prop_Send, "m_nSkin", 3);
-			else if(StrEqual(sColor, "Random", false)) SetEntProp(model, Prop_Send, "m_nSkin", GetRandomInt(0, 3));
-		}
-		
-		SetVariantString("!activator");
-		AcceptEntityInput(model, "SetParent", ent, model, 0);
-		
+		//Creates boss model to bonemerge
 		if (!StrEqual(sType, MONOCULUS))
 		{
+			//Make the boss invisible and place a model over it to bonemerge
+			//Uses new glow entity tf_glow to change glow colors
+			SetEntProp(ent, Prop_Send, "m_fEffects", EF_NODRAW);
+			int model = CreateEntityByName("prop_dynamic_override");
+			attach = model;
+			
+			DispatchKeyValue(model, "targetname", targetname);
+			
+			if (strlen(sModel) != 0)
+				DispatchKeyValue(ent, "model", sModel);	
+			else
+			{
+				PrintToChatAll("1");
+				char mModel[256];
+				GetEntPropString(ent, Prop_Data, "m_ModelName", mModel, sizeof(mModel));
+				DispatchKeyValue(model, "model", mModel);
+			}
+			
+			DispatchKeyValue(model, "solid", "0");
+			SetEntPropEnt(model, Prop_Send, "m_hOwnerEntity", ent);
+			SetEntProp(model, Prop_Send, "m_fEffects", EF_BONEMERGE|EF_NOSHADOW|EF_PARENT_ANIMATES);
+			
+			TeleportEntity(model, kpos, NULL_VECTOR, NULL_VECTOR);
+			DispatchSpawn(model);
+			
+			if (strlen(sColor) != 0)
+			{
+				if(StrEqual(sColor, "Red", false)) SetEntProp(model, Prop_Send, "m_nSkin", 0);
+				else if(StrEqual(sColor, "Blue", false)) SetEntProp(model, Prop_Send, "m_nSkin", 1);
+				else if(StrEqual(sColor, "Green", false)) SetEntProp(model, Prop_Send, "m_nSkin", 2);
+				else if(StrEqual(sColor, "Yellow", false)) SetEntProp(model, Prop_Send, "m_nSkin", 3);
+				else if(StrEqual(sColor, "Random", false)) SetEntProp(model, Prop_Send, "m_nSkin", GetRandomInt(0, 3));
+			}
+			
+			SetVariantString("!activator");
+			AcceptEntityInput(model, "SetParent", ent, model, 0);
+			
 			SetVariantString("head"); 
 			AcceptEntityInput(model, "SetParentAttachment", ent, model, 0);
+			
+			
 		}
+		else
+		{
+			DispatchKeyValue(ent, "targetname", targetname);
+		}
+		
 		
 		if (!sGlowValue[0])
 			SetGlow(ent, targetname, kpos, sGlow);
@@ -992,7 +1003,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			DispatchKeyValue(hat, "model", sHModel);
 			DispatchKeyValue(hat, "spawnflags", "256");
 			DispatchKeyValue(hat, "solid", "0");
-			SetEntPropEnt(hat, Prop_Send, "m_hOwnerEntity", model);
+			SetEntPropEnt(hat, Prop_Send, "m_hOwnerEntity", attach);
 			//Hacky tacky way..
 			//SetEntPropFloat(hat, Prop_Send, "m_flModelScale", iSize > 5 ? (iSize > 10 ? (iSize/5+0.80) : (iSize/4+0.75)) : (iSize/3+0.66));
 			SetEntPropFloat(hat, Prop_Send, "m_flModelScale", StringToFloat(sHatSize));
@@ -1000,15 +1011,15 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			DispatchSpawn(hat);	
 			
 			SetVariantString("!activator");
-			AcceptEntityInput(hat, "SetParent", model, hat, 0);
+			AcceptEntityInput(hat, "SetParent", attach, hat, 0);
 			
 			//maintain the offset of hat to the center of head
 			if (!StrEqual(sType, MONOCULUS))
 			{
 				SetVariantString("head");
-				AcceptEntityInput(hat, "SetParentAttachment", model, hat, 0);
+				AcceptEntityInput(hat, "SetParentAttachment", attach, hat, 0);
 				SetVariantString("head");
-				AcceptEntityInput(hat, "SetParentAttachmentMaintainOffset", model, hat, 0);
+				AcceptEntityInput(hat, "SetParentAttachmentMaintainOffset", attach, hat, 0);
 			}
 			
 			float hatpos[3];
@@ -1620,6 +1631,7 @@ public void SetupBossConfigs(const char[] sFile)
 		KvGetString(kv, "HatPosFix", sHatPosFix, sizeof(sHatPosFix), "0.0");
 		KvGetString(kv, "HatSize", sHatSize, sizeof(sHatSize), "1.0");
 		KvGetString(kv, "Damage", sDamage, sizeof(sDamage), "100.0");
+		PrintToChatAll("model: %s", sModel);
 		
 		if (StrContains(sName, " ") != -1)
 		{
