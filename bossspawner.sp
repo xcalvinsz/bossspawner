@@ -18,6 +18,9 @@ Version Log:
 	- No longer caches values from convars (convars.IntValue is already cached)
 	- No longer need to unhook sdkhook on client disconnect
 	- Fixed a bug where round start would make the next boss timer to disappear
+	- Fixed a bug where the health bar text would only work on the first map and no longer works after a map change
+	- Fixed a bug where plugin should be disabled and still blocked some halloween notications/sounds
+	- Fixed a bug where boss spawned from other plugin would have it's damaged changed by this plugin
 	- Updated some syntax and code clean up
 	- Optimization of code
 	- General code cleanup
@@ -97,7 +100,6 @@ bool gEnabled;
 //Other variables
 int gIndex, gIndexCmd;
 float gPos[3], kPos[3];
-//bool gActiveTimer;
 int g_AutoBoss, gTrack = -1, gHPbar = -1;
 
 int gVotes[MAXPLAYERS+1];
@@ -155,7 +157,7 @@ public void OnPluginStart()
 	gArray = new ArrayList();
 	gData = new ArrayList();
 	
-	CreateTimer(0.5, HealthTimer, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(0.5, HealthTimer, _, TIMER_REPEAT);
 
 	g_cEyeball_Lifetime = FindConVar("tf_eyeball_boss_lifetime");
 	g_cMerasmus_Lifetime = FindConVar("tf_merasmus_lifetime");
@@ -207,6 +209,10 @@ public void OnClientPostAdminCheck(int client)
 	if (GetClientCount(true) == g_cMinplayers.IntValue)
 		if(g_AutoBoss == 0)
 			ResetTimer();
+			
+	if (!gEnabled)
+		return;
+		
 	SDKHook(client, SDKHook_OnTakeDamage, OnClientDamaged);
 }
 
@@ -236,6 +242,9 @@ public void OnConvarChanged(ConVar convar, char[] oldValue, char[] newValue)
 
 public Action SayText2(UserMsg msg_id, Handle bf, int[] players, int playersNum, bool reliable, bool init)
 {
+	if (!gEnabled)
+		return Plugin_Continue;
+		
 	if (!reliable) 
 		return Plugin_Continue;
 	
@@ -339,7 +348,7 @@ public Action ForceBoss(int client, int args)
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	//gActiveTimer = true;
+	
 	if (args == 1)
 	{
 		saveIndex = gIndex;
@@ -582,7 +591,6 @@ public Action SpawnBossCommand(int client, const char[] command, int args)
 		}
 	}
 	gIndexCmd = i;
-	//gActiveTimer = false;
 	CreateBoss(gIndexCmd, kPos, iBaseHP, iScaleHP, iSize, sGlow, true, false);
 	return Plugin_Handled;
 }
@@ -731,7 +739,6 @@ public int EndMenu(Menu MenuHandle, MenuAction action, int client, int num)
 		}
 		
 		kPos[2] -= 10.0;
-		//gActiveTimer = false;
 		CreateBoss(iIndex, kPos, iBaseHP, 0, iSize, sAttribute[3], true, false);
 	}
 	else if (action == MenuAction_End)
@@ -936,10 +943,9 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			DispatchKeyValue(model, "targetname", targetname);
 			
 			if (strlen(sModel) != 0)
-				DispatchKeyValue(ent, "model", sModel);	
+				DispatchKeyValue(model, "model", sModel);	
 			else
 			{
-				PrintToChatAll("1");
 				char mModel[256];
 				GetEntPropString(ent, Prop_Data, "m_ModelName", mModel, sizeof(mModel));
 				DispatchKeyValue(model, "model", mModel);
@@ -1383,7 +1389,7 @@ public Action OnBossDamaged(int victim, int &attacker, int &inflictor, float &da
 }
 
 public Action OnClientDamaged(int victim, int &attacker, int &inflictor, float &damage, int &damagetype)
-{
+{	
 	if (!IsClientInGame(victim)) 
 		return Plugin_Continue;
 		
@@ -1570,6 +1576,7 @@ public void SetupMapConfigs(const char[] sFile)
 			DispatchSpawn(ent);
 		}
 	}
+	
 	if (mapEnabled != 0)
 	{
 		gEnabled = true;
@@ -1599,7 +1606,8 @@ public void SetupBossConfigs(const char[] sFile)
 	Handle kv = CreateKeyValues("Custom Boss Spawner");
 	FileToKeyValues(kv, sPath);
 
-	if (!KvGotoFirstSubKey(kv)) {
+	if (!KvGotoFirstSubKey(kv))
+	{
 		LogError("[CBS] Could not read maps file: %s", sPath);
 		SetFailState("[CBS] Could not read maps file: %s", sPath);
 	}
@@ -1631,7 +1639,6 @@ public void SetupBossConfigs(const char[] sFile)
 		KvGetString(kv, "HatPosFix", sHatPosFix, sizeof(sHatPosFix), "0.0");
 		KvGetString(kv, "HatSize", sHatSize, sizeof(sHatSize), "1.0");
 		KvGetString(kv, "Damage", sDamage, sizeof(sDamage), "100.0");
-		PrintToChatAll("model: %s", sModel);
 		
 		if (StrContains(sName, " ") != -1)
 		{
