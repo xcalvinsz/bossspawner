@@ -21,6 +21,9 @@ Version Log:
 	- Fixed a bug where the health bar text would only work on the first map and no longer works after a map change
 	- Fixed a bug where plugin should be disabled and still blocked some halloween notications/sounds
 	- Fixed a bug where boss spawned from other plugin would have it's damaged changed by this plugin
+	- Fixed a bug where monoculus would switch between models
+	- Fixed a bug where merasmus would switch between skins/colors
+	- Changed warhammer boss from chaos_bosspack config "WeaponModel" to Invisible 
 	- Updated some syntax and code clean up
 	- Optimization of code
 	- General code cleanup
@@ -914,72 +917,60 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		
 		ResizeHitbox(ent, iSize);
 		SetSize(iSize, ent);
-		//SetGlow(iGlow, ent);
 		
 		SetEntProp		(ent, Prop_Data, "m_iHealth", 		sHealth);
 		SetEntProp		(ent, Prop_Data, "m_iMaxHealth", 	sHealth); 
-		//SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		0);
-		
-		//SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		StrEqual(sType, MONOCULUS) ? 5 : 0);
 		
 		SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		(strcmp(sType, MONOCULUS) == 0 || strcmp(sType, SKELETON) == 0) ? 5 : 0);
 		//speed don't work! -.-
 		//SetEntPropFloat	(ent, Prop_Data, "m_flSpeed", 	0.0);
 		
-		//SetEntityModel(ent, sModel);
-		
 		int attach = ent;
 		char targetname[128];
 		Format(targetname, sizeof(targetname), "%s%d", sName, GetRandomInt(2000, 10000));
 		//Creates boss model to bonemerge
-		if (!StrEqual(sType, MONOCULUS))
+		if (strlen(sModel))
 		{
-			//Make the boss invisible and place a model over it to bonemerge
-			//Uses new glow entity tf_glow to change glow colors
-			SetEntProp(ent, Prop_Send, "m_fEffects", EF_NODRAW);
-			int model = CreateEntityByName("prop_dynamic_override");
-			attach = model;
-			
-			DispatchKeyValue(model, "targetname", targetname);
-			
-			if (strlen(sModel) != 0)
-				DispatchKeyValue(model, "model", sModel);	
+			if (!StrEqual(sType, MONOCULUS))
+			{
+				int model = CreateEntityByName("prop_dynamic_override");
+				attach = model;
+				
+				DispatchKeyValue(model, "targetname", targetname);
+				DispatchKeyValue(model, "model", sModel);
+				DispatchKeyValue(model, "solid", "0");
+				SetEntPropEnt(model, Prop_Send, "m_hOwnerEntity", ent);
+				SetEntProp(model, Prop_Send, "m_fEffects", EF_BONEMERGE|EF_NOSHADOW|EF_PARENT_ANIMATES);
+				
+				TeleportEntity(model, kpos, NULL_VECTOR, NULL_VECTOR);
+				DispatchSpawn(model);
+				
+				SetVariantString("!activator");
+				AcceptEntityInput(model, "SetParent", ent, model, 0);
+				
+				SetVariantString("head"); 
+				AcceptEntityInput(model, "SetParentAttachment", ent, model, 0);
+				
+				SetEntProp(ent, Prop_Send, "m_fEffects", EF_NODRAW);
+			}
 			else
 			{
-				char mModel[256];
-				GetEntPropString(ent, Prop_Data, "m_ModelName", mModel, sizeof(mModel));
-				DispatchKeyValue(model, "model", mModel);
+				DispatchKeyValue(ent, "targetname", targetname);
 			}
-			
-			DispatchKeyValue(model, "solid", "0");
-			SetEntPropEnt(model, Prop_Send, "m_hOwnerEntity", ent);
-			SetEntProp(model, Prop_Send, "m_fEffects", EF_BONEMERGE|EF_NOSHADOW|EF_PARENT_ANIMATES);
-			
-			TeleportEntity(model, kpos, NULL_VECTOR, NULL_VECTOR);
-			DispatchSpawn(model);
-			
-			if (strlen(sColor) != 0)
-			{
-				if(StrEqual(sColor, "Red", false)) SetEntProp(model, Prop_Send, "m_nSkin", 0);
-				else if(StrEqual(sColor, "Blue", false)) SetEntProp(model, Prop_Send, "m_nSkin", 1);
-				else if(StrEqual(sColor, "Green", false)) SetEntProp(model, Prop_Send, "m_nSkin", 2);
-				else if(StrEqual(sColor, "Yellow", false)) SetEntProp(model, Prop_Send, "m_nSkin", 3);
-				else if(StrEqual(sColor, "Random", false)) SetEntProp(model, Prop_Send, "m_nSkin", GetRandomInt(0, 3));
-			}
-			
-			SetVariantString("!activator");
-			AcceptEntityInput(model, "SetParent", ent, model, 0);
-			
-			SetVariantString("head"); 
-			AcceptEntityInput(model, "SetParentAttachment", ent, model, 0);
-			
-			
 		}
 		else
 		{
 			DispatchKeyValue(ent, "targetname", targetname);
 		}
 		
+		if (strlen(sColor) != 0)
+		{
+			if(StrEqual(sColor, "Red", false)) SetEntProp(attach, Prop_Send, "m_nSkin", 0);
+			else if(StrEqual(sColor, "Blue", false)) SetEntProp(attach, Prop_Send, "m_nSkin", 1);
+			else if(StrEqual(sColor, "Green", false)) SetEntProp(attach, Prop_Send, "m_nSkin", 2);
+			else if(StrEqual(sColor, "Yellow", false)) SetEntProp(attach, Prop_Send, "m_nSkin", 3);
+			else if(StrEqual(sColor, "Random", false)) SetEntProp(attach, Prop_Send, "m_nSkin", GetRandomInt(0, 3));
+		}
 		
 		if (!sGlowValue[0])
 			SetGlow(ent, targetname, kpos, sGlow);
@@ -1056,52 +1047,52 @@ public Action RemoveTimer(Handle hTimer, DataPack jPack)
 {
 	jPack.Reset();
 	int ent = EntRefToEntIndex(jPack.ReadCell());
-	if (IsValidEntity(ent))
+	
+	if (!IsValidEntity(ent))
+		return Plugin_Stop;
+		
+	float tcounter = jPack.ReadCell();
+	if (tcounter <= 0.0)
 	{
-		float tcounter = jPack.ReadCell();
-		if (tcounter <= 0.0)
-		{
-			AcceptEntityInput(ent, "Kill");
-			return Plugin_Stop;
-		}
-		else
-		{
-			tcounter -= 1.0;
-			jPack.Reset();
-			jPack.ReadCell();
-			jPack.WriteCell(tcounter);
-			return Plugin_Continue;
-		}
+		AcceptEntityInput(ent, "Kill");
+		return Plugin_Stop;
 	}
-	return Plugin_Stop;
+	else
+	{
+		tcounter -= 1.0;
+		jPack.Reset();
+		jPack.ReadCell();
+		jPack.WriteCell(tcounter);
+		return Plugin_Continue;
+	}
 }
 
 public Action RemoveTimerPrint(Handle hTimer, DataPack hPack)
 {
 	hPack.Reset();
 	int ent = EntRefToEntIndex(hPack.ReadCell());
-	if (IsValidEntity(ent))
+	
+	if (!IsValidEntity(ent))
+		return Plugin_Stop;
+		
+	float tcounter = hPack.ReadCell();
+	if (tcounter <= 0.0)
 	{
-		float tcounter = hPack.ReadCell();
-		if (tcounter <= 0.0)
-		{
-			int index = hPack.ReadCell();
-			char sName[64];
-			StringMap HashMap = gArray.Get(index);
-			HashMap.GetString("Name", sName, sizeof(sName));
-			CPrintToChatAll("%t", "Boss_Left", sName);
-			return Plugin_Stop;
-		}
-		else
-		{
-			tcounter -= 1.0;
-			hPack.Reset();
-			hPack.ReadCell();
-			hPack.WriteCell(tcounter);
-			return Plugin_Continue;
-		}
+		int index = hPack.ReadCell();
+		char sName[64];
+		StringMap HashMap = gArray.Get(index);
+		HashMap.GetString("Name", sName, sizeof(sName));
+		CPrintToChatAll("%t", "Boss_Left", sName);
+		return Plugin_Stop;
 	}
-	return Plugin_Stop;
+	else
+	{
+		tcounter -= 1.0;
+		hPack.Reset();
+		hPack.ReadCell();
+		hPack.WriteCell(tcounter);
+		return Plugin_Continue;
+	}
 }
 
 //Instead of hooking to sdkhook_takedamage, we use a 0.5 timer because of hud overloading when taking damage
@@ -1357,7 +1348,7 @@ public void OnPropSpawn(any ref)
 				if (strlen(sWModel) != 0)
 				{
 					if (StrEqual(sWModel, "Invisible"))
-						SetEntityModel(ent, "");
+						SetEntProp(ent, Prop_Send, "m_fEffects", EF_NODRAW);
 					else
 					{
 						SetEntityModel(ent, sWModel);
