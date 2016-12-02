@@ -12,7 +12,7 @@
  *	If you have paid for this plugin, get your money back.
  *	
 Version Log:
-~ Next version
+~ v.5.1
 	- Properly use FindConvar instead of ServerCommand to execute convars ("tf_eyeball_boss_lifetime" and "tf_merasmus_lifetime").
 	- Changed a bad attempt at managing convars ("tf_eyeball_boss_lifetime" and "tf_merasmus_lifetime"), plugin will now instead just set those values to 9999999 and default values when unloaded.
 	- No longer caches values from convars (convars.IntValue is already cached)
@@ -23,7 +23,9 @@ Version Log:
 	- Fixed a bug where boss spawned from other plugin would have it's damaged changed by this plugin
 	- Fixed a bug where monoculus would switch between models
 	- Fixed a bug where merasmus would switch between skins/colors
-	- Changed warhammer boss from chaos_bosspack config "WeaponModel" to Invisible 
+	- Changed warhammer boss from chaos_bosspack config "WeaponModel" to Invisible
+	- Improved caching of bosses data into memory
+	- Improved timer that keeps track of boss lifetime
 	- Updated some syntax and code clean up
 	- Optimization of code
 	- General code cleanup
@@ -65,7 +67,7 @@ Known bugs:
 	- multiple sounds played on death
 	- boss needs to be hit 1 last time to die
 	- Horseman axe will NOT glow
-	- Merasmus will tend to randomly change color from green to normal
+	//- Merasmus will tend to randomly change color from green to normal
 	- Monoculus can no longer have model replacement due to some complications
 	- Botkiller and Ghost can not be resized
 	- When tf_skeleton with a hat attacks you while standing still, his hat model may freeze until he starts moving
@@ -153,7 +155,7 @@ public void OnPluginStart()
 	g_iArray = new ArrayList();
 	g_iArrayData = new ArrayList();
 	
-	CreateTimer(0.5, HealthTimer, _, TIMER_REPEAT);
+	CreateTimer(0.5, Timer_Healthbar, _, TIMER_REPEAT);
 
 	g_cEyeball_Lifetime = FindConVar("tf_eyeball_boss_lifetime");
 	g_cMerasmus_Lifetime = FindConVar("tf_merasmus_lifetime");
@@ -191,7 +193,7 @@ public void OnConfigsExecuted()
 	
 	for (int i = 1; i <= MaxClients; i++)
 		if(IsClientInGame(i))
-			SDKHook(i, SDKHook_OnTakeDamage, OnClientDamaged);
+			SDKHook(i, SDKHook_OnTakeDamage, Hook_ClientTakeDamage);
 }
 
 public void OnMapEnd()
@@ -209,7 +211,7 @@ public void OnClientPostAdminCheck(int client)
 	if (!g_bEnabled)
 		return;
 		
-	SDKHook(client, SDKHook_OnTakeDamage, OnClientDamaged);
+	SDKHook(client, SDKHook_OnTakeDamage, Hook_ClientTakeDamage);
 }
 
 public void OnClientDisconnect_Post(int client)
@@ -390,14 +392,15 @@ public Action Command_GetCoordinates(int client, int args)
 		return Plugin_Handled;
 	}
 	
-	if (!IsClientInGame(client) || !IsPlayerAlive(client)) {
+	if (!IsClientInGame(client) || !IsPlayerAlive(client))
+	{
 		CReplyToCommand(client, "{frozen}[Boss] You must be alive and in-game to use this command.");
 		return Plugin_Handled;
 	}
 	
-	float l_pos[3];
-	GetClientAbsOrigin(client, l_pos);
-	CReplyToCommand(client, "{frozen}[Boss] {orange}Coordinates: %0.0f,%0.0f,%0.0f\n{frozen}[Boss] {orange}Use those coordinates and place them in configs/bossspawner_maps.cfg", l_pos[0], l_pos[1], l_pos[2]);
+	float pos[3];
+	GetClientAbsOrigin(client, pos);
+	CReplyToCommand(client, "{frozen}[Boss] {orange}Coordinates: %0.0f,%0.0f,%0.0f\n{frozen}[Boss] {orange}Use those coordinates and place them in configs/bossspawner_maps.cfg", pos[0], pos[1], pos[2]);
 	return Plugin_Handled;
 }
 
@@ -849,35 +852,36 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	for (int i = 0; i < 3; i++)
 		temp[i] = kpos[i];
 	
-	char sName[64], sModel[256], sType[32], sBase[16], sScale[16], sSize[16], sGlow[32], sPosFix[32];
-	char sLifetime[32], sPosition[32], sHorde[8], sColor[16], sHModel[256], sISound[256], sHatPosFix[32], sHatSize[16];
+	char sName[64], sModel[256], sType[32], sGlow[32], sPosition[32], sHModel[256], sISound[256];
+	int iBase, iScale, iLifetime, iHorde, iColor;
+	float fSize, fPosFix, fHatPosFix, fHatSize;
 
 	StringMap HashMap = g_iArray.Get(index);
 	HashMap.GetString("Name", sName, sizeof(sName));
 	HashMap.GetString("Model", sModel, sizeof(sModel));
 	HashMap.GetString("Type", sType, sizeof(sType));
-	HashMap.GetString("Base", sBase, sizeof(sBase));
-	HashMap.GetString("Scale", sScale, sizeof(sScale));
-	HashMap.GetString("Size", sSize, sizeof(sSize));
+	HashMap.GetValue("Base", iBase);
+	HashMap.GetValue("Scale", iScale);
+	HashMap.GetValue("Size", fSize);
 	HashMap.GetString("Glow", sGlow, sizeof(sGlow));
-	HashMap.GetString("PosFix", sPosFix, sizeof(sPosFix));
-	HashMap.GetString("Lifetime", sLifetime, sizeof(sLifetime));
+	HashMap.GetValue("PosFix", fPosFix);
+	HashMap.GetValue("Lifetime", iLifetime);
 	HashMap.GetString("Position", sPosition, sizeof(sPosition));
-	HashMap.GetString("Horde", sHorde, sizeof(sHorde));
-	HashMap.GetString("Color", sColor, sizeof(sColor));
+	HashMap.GetValue("Horde", iHorde);
+	HashMap.GetValue("Color", iColor);
 	HashMap.GetString("HatModel", sHModel, sizeof(sHModel));
 	HashMap.GetString("IntroSound", sISound, sizeof(sISound));
-	HashMap.GetString("HatPosFix", sHatPosFix, sizeof(sHatPosFix));
-	HashMap.GetString("HatSize", sHatSize, sizeof(sHatSize));
+	HashMap.GetValue("HatPosFix", fHatPosFix);
+	HashMap.GetValue("HatSize", fHatSize);
 	
 	if (iBaseHP == -1)
-		iBaseHP = StringToInt(sBase);
+		iBaseHP = iBase;
 		
 	if (iScaleHP == -1)
-		iScaleHP = StringToInt(sScale);
+		iScaleHP = iScale;
 		
 	if (iSize == -1.0)
-		iSize = StringToFloat(sSize);
+		iSize = fSize;
 		
 	if (strlen(sPosition) != 0 && !isCMD)
 	{
@@ -888,8 +892,8 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			temp[i] = StringToFloat(sPos[i]);
 	}
 	
-	temp[2] += StringToFloat(sPosFix);
-	int iMax = StringToInt(sHorde) <= 1 ? 1 : StringToInt(sHorde);
+	temp[2] += fPosFix;
+	int iMax = iHorde <= 1 ? 1 : iHorde;
 	int playerCounter = GetClientCount(true);
 	int sHealth = (iBaseHP + iScaleHP*playerCounter)*(iMax != 1 ? 1 : 10);
 	DataPack dMax = new DataPack();
@@ -911,10 +915,11 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		ResizeHitbox(ent, iSize);
 		SetSize(iSize, ent);
 		
-		SetEntProp		(ent, Prop_Data, "m_iHealth", 		sHealth);
-		SetEntProp		(ent, Prop_Data, "m_iMaxHealth", 	sHealth); 
+		SetEntProp(ent, Prop_Data, "m_iHealth", sHealth);
+		SetEntProp(ent, Prop_Data, "m_iMaxHealth",sHealth); 
 		
-		SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		(strcmp(sType, MONOCULUS) == 0 || strcmp(sType, SKELETON) == 0) ? 5 : 0);
+		//SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		(strcmp(sType, MONOCULUS) == 0 || strcmp(sType, SKELETON) == 0) ? 5 : 0);
+		SetEntProp(ent, Prop_Data, "m_iTeamNum", (StrEqual(sType, MONOCULUS) || StrEqual(sType, SKELETON)) ? 5 : 0);
 		//speed don't work! -.-
 		//SetEntPropFloat	(ent, Prop_Data, "m_flSpeed", 	0.0);
 		
@@ -951,15 +956,8 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		}
 		else
 			DispatchKeyValue(ent, "targetname", targetname);
-		
-		if (strlen(sColor) != 0)
-		{
-			if(StrEqual(sColor, "Red", false)) SetEntProp(attach, Prop_Send, "m_nSkin", 0);
-			else if(StrEqual(sColor, "Blue", false)) SetEntProp(attach, Prop_Send, "m_nSkin", 1);
-			else if(StrEqual(sColor, "Green", false)) SetEntProp(attach, Prop_Send, "m_nSkin", 2);
-			else if(StrEqual(sColor, "Yellow", false)) SetEntProp(attach, Prop_Send, "m_nSkin", 3);
-			else if(StrEqual(sColor, "Random", false)) SetEntProp(attach, Prop_Send, "m_nSkin", GetRandomInt(0, 3));
-		}
+			
+		SetEntProp(attach, Prop_Send, "m_nSkin", iColor == 4 ? GetRandomInt(0, 3) : iColor);
 		
 		if (!sGlowValue[0])
 			SetGlow(ent, targetname, kpos, sGlow);
@@ -969,19 +967,21 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		if (timed) 
 			g_iBossCount++;
 			
-		if (i == 0)
+		/*if (i == 0)
 		{
 			DataPack hPack;
-			CreateDataTimer(1.0, RemoveTimerPrint, hPack, TIMER_REPEAT);
+			CreateDataTimer(1.0, Timer_Notification, hPack, TIMER_REPEAT);
 			hPack.WriteCell(EntIndexToEntRef(ent));
-			hPack.WriteCell(StringToFloat(sLifetime));
+			hPack.WriteCell(iLifetime);
 			hPack.WriteCell(index);
-		}
+		}*/
 		
-		DataPack jPack;
-		CreateDataTimer(1.0, RemoveTimer, jPack, TIMER_REPEAT);
-		jPack.WriteCell(EntIndexToEntRef(ent));
-		jPack.WriteCell(StringToFloat(sLifetime));
+		DataPack hPack;
+		CreateDataTimer(1.0, Timer_Remove, hPack, TIMER_REPEAT);
+		hPack.WriteCell(EntIndexToEntRef(ent));
+		hPack.WriteCell(iLifetime);
+		hPack.WriteCell(1);
+		hPack.WriteCell(index);
 		
 		if (strlen(sHModel) != 0)
 		{
@@ -992,7 +992,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			SetEntPropEnt(hat, Prop_Send, "m_hOwnerEntity", attach);
 			//Hacky tacky way..
 			//SetEntPropFloat(hat, Prop_Send, "m_flModelScale", iSize > 5 ? (iSize > 10 ? (iSize/5+0.80) : (iSize/4+0.75)) : (iSize/3+0.66));
-			SetEntPropFloat(hat, Prop_Send, "m_flModelScale", StringToFloat(sHatSize));
+			SetEntPropFloat(hat, Prop_Send, "m_flModelScale", fHatSize);
 			//SetEntPropFloat(hat, Prop_Send, "m_flModelScale", iSize*StringToFloat(sHatSize));
 			DispatchSpawn(hat);	
 			
@@ -1009,7 +1009,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			}
 			
 			float hatpos[3];
-			hatpos[2] += StringToFloat(sHatPosFix);//*iSize; //-9.5*iSize
+			hatpos[2] += fHatPosFix;//*iSize; //-9.5*iSize
 			//hatpos[0] += -5.0;
 			TeleportEntity(hat, hatpos, NULL_VECTOR, NULL_VECTOR);
 		}
@@ -1032,31 +1032,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	}
 }
 
-public Action RemoveTimer(Handle hTimer, DataPack jPack)
-{
-	jPack.Reset();
-	int ent = EntRefToEntIndex(jPack.ReadCell());
-	
-	if (!IsValidEntity(ent))
-		return Plugin_Stop;
-		
-	float tcounter = jPack.ReadCell();
-	if (tcounter <= 0.0)
-	{
-		AcceptEntityInput(ent, "Kill");
-		return Plugin_Stop;
-	}
-	else
-	{
-		tcounter -= 1.0;
-		jPack.Reset();
-		jPack.ReadCell();
-		jPack.WriteCell(tcounter);
-		return Plugin_Continue;
-	}
-}
-
-public Action RemoveTimerPrint(Handle hTimer, DataPack hPack)
+public Action Timer_Remove(Handle hTimer, DataPack hPack)
 {
 	hPack.Reset();
 	int ent = EntRefToEntIndex(hPack.ReadCell());
@@ -1064,8 +1040,46 @@ public Action RemoveTimerPrint(Handle hTimer, DataPack hPack)
 	if (!IsValidEntity(ent))
 		return Plugin_Stop;
 		
-	float tcounter = hPack.ReadCell();
-	if (tcounter <= 0.0)
+	int iCounter = hPack.ReadCell();
+	
+	if (iCounter <= 0)
+	{
+		if (hPack.ReadCell())
+		{
+			char sName[64];
+			StringMap HashMap = g_iArray.Get(hPack.ReadCell());
+			HashMap.GetString("Name", sName, sizeof(sName));
+			CPrintToChatAll("%t", "Boss_Left", sName);
+			
+			hPack.Reset();
+			hPack.ReadCell();
+			hPack.ReadCell();
+			hPack.WriteCell(0);
+		}
+		
+		AcceptEntityInput(ent, "Kill");
+		return Plugin_Stop;
+	}
+	else
+	{
+		iCounter -= 1;
+		hPack.Reset();
+		hPack.ReadCell();
+		hPack.WriteCell(iCounter);
+		return Plugin_Continue;
+	}
+}
+/*
+public Action Timer_Notification(Handle hTimer, DataPack hPack)
+{
+	hPack.Reset();
+	int ent = EntRefToEntIndex(hPack.ReadCell());
+	
+	if (!IsValidEntity(ent))
+		return Plugin_Stop;
+		
+	int iCounter = hPack.ReadCell();
+	if (iCounter <= 0)
 	{
 		int index = hPack.ReadCell();
 		char sName[64];
@@ -1076,16 +1090,16 @@ public Action RemoveTimerPrint(Handle hTimer, DataPack hPack)
 	}
 	else
 	{
-		tcounter -= 1.0;
+		iCounter -= 1;
 		hPack.Reset();
 		hPack.ReadCell();
-		hPack.WriteCell(tcounter);
+		hPack.WriteCell(iCounter);
 		return Plugin_Continue;
 	}
-}
+}*/
 
 //Instead of hooking to sdkhook_takedamage, we use a 0.5 timer because of hud overloading when taking damage
-public Action HealthTimer(Handle hTimer, any ref)
+public Action Timer_Healthbar(Handle hTimer, any ref)
 {
 	if (g_cHealthbar.IntValue == 0 || g_cHealthbar.IntValue == 1)
 		return Plugin_Continue;
@@ -1229,7 +1243,7 @@ public void OnEntityCreated(int ent, const char[] classname)
 	else if ((StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) || StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON)))
 	{
 		g_iBossEntity = ent;
-		SDKHook(ent, SDKHook_OnTakeDamagePost, OnBossDamaged);
+		SDKHook(ent, SDKHook_OnTakeDamagePost, Hook_BossTakeDamage);
 		RequestFrame(UpdateBossHealth, EntIndexToEntRef(ent));
 	}
 	else if (StrEqual(classname, "prop_dynamic"))
@@ -1261,7 +1275,7 @@ public void OnEntityDestroyed(int ent)
 			}
 		}
 		if (g_iBossEntity != -1) 
-			SDKHook(g_iBossEntity, SDKHook_OnTakeDamagePost, OnBossDamaged);
+			SDKHook(g_iBossEntity, SDKHook_OnTakeDamagePost, Hook_BossTakeDamage);
 		else
 			SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
 	}
@@ -1363,12 +1377,12 @@ void FindHealthBar()
 	}
 }
 
-public Action OnBossDamaged(int victim, int &attacker, int &inflictor, float &damage, int &damagetype)
+public Action Hook_BossTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype)
 {
 	UpdateBossHealth(victim);
 }
 
-public Action OnClientDamaged(int victim, int &attacker, int &inflictor, float &damage, int &damagetype)
+public Action Hook_ClientTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype)
 {	
 	if (!IsClientInGame(victim)) 
 		return Plugin_Continue;
@@ -1381,7 +1395,7 @@ public Action OnClientDamaged(int victim, int &attacker, int &inflictor, float &
 	
 	if (StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) || StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON))
 	{
-		char sDamage[32];
+		float fDamage;
 		for (int i = g_iArrayData.Length-1; i >= 0; i--)
 		{
 			ArrayList dReference = g_iArrayData.Get(i);
@@ -1391,8 +1405,8 @@ public Action OnClientDamaged(int victim, int &attacker, int &inflictor, float &
 			if (attacker == dEnt)
 			{
 				StringMap HashMap = g_iArray.Get(dIndex);
-				HashMap.GetString("Damage", sDamage, sizeof(sDamage));
-				damage = StringToFloat(sDamage);
+				HashMap.GetValue("Damage", fDamage);
+				damage = fDamage;
 				return Plugin_Changed;
 			}
 		}
@@ -1433,10 +1447,10 @@ public void UpdateBossHealth(int ent)
 			if (ent == dEnt) 
 			{
 				int dIndex = dReference.Get(2);
-				char sGnome[8];
+				int iGnome;
 				StringMap HashMap = g_iArray.Get(dIndex);
-				HashMap.GetString("Gnome", sGnome, sizeof(sGnome));
-				if (StringToInt(sGnome) == 0)
+				HashMap.GetValue("Gnome", iGnome);
+				if (!iGnome)
 					AcceptEntityInput(ent, "kill");
 				break;
 			}
@@ -1617,6 +1631,7 @@ public void SetupBossConfigs(const char[] sFile)
 		KvGetString(kv, "HatSize", sHatSize, sizeof(sHatSize), "1.0");
 		KvGetString(kv, "Damage", sDamage, sizeof(sDamage), "100.0");
 		
+		
 		if (StrContains(sName, " ") != -1)
 		{
 			LogError("[CBS] Error: Boss names should not have spaces, please replace spaces with underscore '_'");
@@ -1628,6 +1643,33 @@ public void SetupBossConfigs(const char[] sFile)
 		bool bMerasmus = StrEqual(sType, MERASMUS);
 		bool bSkeleton = StrEqual(sType, SKELETON);
 		
+		int iBase = StringToInt(sBase);
+		int iScale = StringToInt(sScale);
+		float fSize = StringToFloat(sSize);
+		float fPosFix = StringToFloat(sPosFix);
+		int iLifetime = StringToInt(sLifetime);
+		int iHorde = StringToInt(sHorde);
+		
+		int iColor;
+		if (StrEqual(sColor, "red", false))
+			iColor = 0;
+		else if (StrEqual(sColor, "blue", false))
+			iColor = 1;
+		else if (StrEqual(sColor, "green", false))
+			iColor = 2;
+		else if (StrEqual(sColor, "yellow", false))
+			iColor = 3;
+		else if (StrEqual(sColor, SNULL, false))
+			iColor = -1;
+		else
+			iColor = 4;
+			
+		int iGnome = StringToInt(sGnome);
+		float fHatPosFix = StringToFloat(sHatPosFix);
+		float fHatSize = StringToFloat(sHatSize);
+		float fDamage = StringToFloat(sDamage);
+		
+		
 		if (!bHorseman && !bMonoculus && !bMerasmus && !bSkeleton)
 		{
 			LogError("[CBS] Boss type is undetermined, please check the boss type spelling again.");
@@ -1636,17 +1678,17 @@ public void SetupBossConfigs(const char[] sFile)
 		
 		if (!bSkeleton)
 		{
-			if (!StrEqual(sHorde, "1"))
+			if (iHorde != 1)
 			{
 				LogError("[CBS] Horde mode only works for boss type: tf_zombie.");
 				SetFailState("[CBS] Horde mode only works for boss type: tf_zombie.");
 			}
-			if (strlen(sColor))
+			if (iColor != -1)
 			{
 				LogError("[CBS] Color mode only works for boss type: tf_zombie.");
 				SetFailState("[CBS] Color mode only works for boss type: tf_zombie.");
 			}
-			if (!StrEqual(sGnome, "0"))
+			if (iGnome != 0)
 			{
 				LogError("[CBS] Gnome only works for boss type: tf_zombie.");
 				SetFailState("[CBS] Gnome only works for boss type: tf_zombie.");
@@ -1674,9 +1716,7 @@ public void SetupBossConfigs(const char[] sFile)
 				SetFailState("[CBS] Weapon model can only be changed on boss type: headless_hatman");
 			}
 			else if (!StrEqual(sWModel, "Invisible"))
-			{
 				PrecacheModel(sWModel, true);
-			}
 		}
 		
 		if (strlen(sModel))
@@ -1692,23 +1732,23 @@ public void SetupBossConfigs(const char[] sFile)
 		HashMap.SetString("Name", sName, false);
 		HashMap.SetString("Model", sModel, false);
 		HashMap.SetString("Type", sType, false);
-		HashMap.SetString("Base", sBase, false);
-		HashMap.SetString("Scale", sScale, false);
+		HashMap.SetValue("Base", iBase, false);
+		HashMap.SetValue("Scale", iScale, false);
 		HashMap.SetString("WeaponModel", sWModel, false);
-		HashMap.SetString("Size", sSize, false);
+		HashMap.SetValue("Size", fSize, false);
 		HashMap.SetString("Glow", sGlow, false);
-		HashMap.SetString("PosFix", sPosFix, false);
-		HashMap.SetString("Lifetime", sLifetime, false);
+		HashMap.SetValue("PosFix", fPosFix, false);
+		HashMap.SetValue("Lifetime", iLifetime, false);
 		HashMap.SetString("Position", sPosition, false);
-		HashMap.SetString("Horde", sHorde, false);
-		HashMap.SetString("Color", sColor, false);
+		HashMap.SetValue("Horde", iHorde, false);
+		HashMap.SetValue("Color", iColor, false);
 		HashMap.SetString("IntroSound", sISound, false);
 		HashMap.SetString("DeathSound", sDSound, false);
 		HashMap.SetString("HatModel", sHModel, false);
-		HashMap.SetString("Gnome", sGnome, false);
-		HashMap.SetString("HatPosFix", sHatPosFix, false);
-		HashMap.SetString("HatSize", sHatSize, false);
-		HashMap.SetString("Damage", sDamage, false);
+		HashMap.SetValue("Gnome", iGnome, false);
+		HashMap.SetValue("HatPosFix", fHatPosFix, false);
+		HashMap.SetValue("HatSize", fHatSize, false);
+		HashMap.SetValue("Damage", fDamage, false);
 		g_iArray.Push(HashMap);
 		
 		char command[64];
