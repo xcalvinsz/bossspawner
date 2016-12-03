@@ -165,6 +165,10 @@ public void OnPluginStart()
 	g_cMinplayers.AddChangeHook(OnConvarChanged);
 	g_cInterval.AddChangeHook(OnConvarChanged);
 	
+	for (int i = 1; i <= MaxClients; i++)
+		if(IsClientInGame(i))
+			SDKHook(i, SDKHook_OnTakeDamage, Hook_ClientTakeDamage);
+	
 	LoadTranslations("common.phrases");
 	LoadTranslations("bossspawner.phrases");
 	
@@ -190,10 +194,6 @@ public void OnConfigsExecuted()
 		
 	FindHealthBar();
 	PrecacheSound("items/cart_explode.wav");
-	
-	for (int i = 1; i <= MaxClients; i++)
-		if(IsClientInGame(i))
-			SDKHook(i, SDKHook_OnTakeDamage, Hook_ClientTakeDamage);
 }
 
 public void OnMapEnd()
