@@ -23,6 +23,8 @@ Version Log:
 	- Fixed a bug where boss spawned from other plugin would have it's damaged changed by this plugin
 	- Fixed a bug where monoculus would switch between models
 	- Fixed a bug where merasmus would switch between skins/colors
+	- Fixed a bug where healthbar type convar set to 0 or 2 might break the health bar tracking of bosses
+	- FINALLY fixed a bug where boss would need to be hit 1 MORE time after it hit 0 health.
 	- Changed warhammer boss from chaos_bosspack config "WeaponModel" to Invisible
 	- Improved caching of bosses data into memory
 	- Improved timer that keeps track of boss lifetime
@@ -63,12 +65,13 @@ New default bosses: (Bosses that do not require any model/material downloads)
 	- Botkiller
 
 Known bugs: 
+	- Need to fix the vote percentage being wrong
+	- Need to fix translation files for vote ended
+	- Bug with healthbar not being removed when boss leaves by itself
 	- Death event notification
 	- multiple sounds played on death
-	- boss needs to be hit 1 last time to die
 	- Horseman axe will NOT glow
-	//- Merasmus will tend to randomly change color from green to normal
-	- Monoculus can no longer have model replacement due to some complications
+	- Can not set model on monoculus, plugin will error out if done so
 	- Botkiller and Ghost can not be resized
 	- When tf_skeleton with a hat attacks you while standing still, his hat model may freeze until he starts moving
 	- eyeball_boss can die from collision from a payload cart, most of time in air so it doesn't matter too much
@@ -1013,6 +1016,14 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			//hatpos[0] += -5.0;
 			TeleportEntity(hat, hatpos, NULL_VECTOR, NULL_VECTOR);
 		}
+		
+		//SDKHook(ent, SDKHook_Think, Hook_PreThink);
+		//DataPack jPack = new DataPack();
+		//jPack.WriteCell(EntIndexToEntRef(ent));
+		//jPack.WriteString(sGlow);
+		//jPack.WriteString(sGlowValue);
+		//jPack.WriteCell(index);
+		//RequestFrame(Frame_GetWeapon, jPack);
 	}
 	
 	if (!StrEqual(sISound, "none", false))
@@ -1031,6 +1042,53 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			g_iIndex = 0;
 	}
 }
+/*
+public void Hook_PreThink(int ent)
+{
+	SetEntPropFloat(ent, Prop_Data, "m_flSpeed", 0.0);
+}*/
+/*
+public void Frame_GetWeapon(DataPack jPack)
+{
+	jPack.Reset();
+	int ent = EntRefToEntIndex(jPack.ReadCell());
+	char sGlow[32], sGlowValue[32];
+	jPack.ReadString(sGlow, 32);
+	jPack.ReadString(sGlowValue, 32);
+	PrintToChatAll("1");
+	int weapon = GetEntPropEnt(ent, Prop_Send, "m_hActiveWeapon");
+	PrintToChatAll("weapon: %d", weapon);
+	if (weapon == -1)
+		return;
+	PrintToChatAll("2");
+	float pos[3];
+	GetEntPropVector(weapon, Prop_Send, "m_vecOrigin", pos);
+	
+	char targetname[128];
+	Format(targetname, sizeof(targetname), "axeweapon%d", GetRandomInt(2000, 10000));
+	PrintToChatAll("3");
+	if (!sGlowValue[0])
+		SetGlow(ent, targetname, pos, sGlow);
+	else
+		SetGlow(ent, targetname, pos, sGlowValue);
+		
+	int index = jPack.ReadCell();
+	PrintToChatAll("4");
+	char sWModel[256];
+	StringMap HashMap = g_iArray.Get(index);
+	HashMap.GetString("WeaponModel", sWModel, sizeof(sWModel));
+	PrintToChatAll("model: %s", sWModel);
+	if (strlen(sWModel) != 0)
+	{
+		if (StrEqual(sWModel, "Invisible"))
+			SetEntProp(weapon, Prop_Send, "m_fEffects", EF_NODRAW);
+		else
+		{
+			SetEntityModel(weapon, sWModel);
+			//SetEntPropEnt(parent, Prop_Send, "m_hActiveWeapon", ent);
+		}
+	}
+}*/
 
 public Action Timer_Remove(Handle hTimer, DataPack hPack)
 {
@@ -1144,7 +1202,7 @@ void RemoveExistingBoss()
 		AcceptEntityInput(ent, "Kill");
 			
 	while ((ent = FindEntityByClassname(ent, "tf_zombie")) != -1)
-			AcceptEntityInput(ent, "Kill");
+		AcceptEntityInput(ent, "Kill");
 			
 	SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
 }
@@ -1243,8 +1301,10 @@ public void OnEntityCreated(int ent, const char[] classname)
 	else if ((StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) || StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON)))
 	{
 		g_iBossEntity = ent;
-		SDKHook(ent, SDKHook_OnTakeDamagePost, Hook_BossTakeDamage);
-		RequestFrame(UpdateBossHealth, EntIndexToEntRef(ent));
+		SDKHook(ent, SDKHook_OnTakeDamage, Hook_BossTakeDamage);
+		//RequestFrame(UpdateBossHealth, EntIndexToEntRef(ent));
+		if (g_cHealthbar.IntValue == 1 || g_cHealthbar.IntValue == 3)
+			SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 2559);
 	}
 	else if (StrEqual(classname, "prop_dynamic"))
 		RequestFrame(OnPropSpawn, EntIndexToEntRef(ent));
@@ -1275,7 +1335,7 @@ public void OnEntityDestroyed(int ent)
 			}
 		}
 		if (g_iBossEntity != -1) 
-			SDKHook(g_iBossEntity, SDKHook_OnTakeDamagePost, Hook_BossTakeDamage);
+			SDKHook(g_iBossEntity, SDKHook_OnTakeDamage, Hook_BossTakeDamage);
 		else
 			SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
 	}
@@ -1333,9 +1393,9 @@ public void OnPropSpawn(any ref)
 	if (!IsValidEntity(parent)) 
 		return;
 		
-	char strClassname[64];
-	GetEntityClassname(parent, strClassname, sizeof(strClassname));
-	if (StrEqual(strClassname, HORSEMAN, false))
+	char classname[64];
+	GetEntityClassname(parent, classname, 64);
+	if (StrEqual(classname, HORSEMAN, false))
 	{
 		for (int i = g_iArrayData.Length-1; i >= 0; i--)
 		{
@@ -1377,11 +1437,6 @@ void FindHealthBar()
 	}
 }
 
-public Action Hook_BossTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype)
-{
-	UpdateBossHealth(victim);
-}
-
 public Action Hook_ClientTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype)
 {	
 	if (!IsClientInGame(victim)) 
@@ -1414,25 +1469,20 @@ public Action Hook_ClientTakeDamage(int victim, int &attacker, int &inflictor, f
 	return Plugin_Continue;
 }
 
-public void UpdateBossHealth(int ent) 
+public Action Hook_BossTakeDamage(int ent, int &attacker, int &inflictor, float &damage, int &damagetype)
 {
-	if (g_iHealthbar == -1 || g_cHealthbar.IntValue == 0 || g_cHealthbar.IntValue == 2)
-		return;
-	
-	if (!IsValidEntity(ent))
-	{
-		SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
-		return;
-	}
+	if (g_iHealthbar == -1)
+		return Plugin_Continue;
 	
 	int HP = GetEntProp(ent, Prop_Data, "m_iHealth");
 	int maxHP = GetEntProp(ent, Prop_Data, "m_iMaxHealth");
-	float currentHP = HP - maxHP * 0.9;
+	float currentHP = (HP - maxHP * 0.9) - damage;
 	
 	if (currentHP > 0.0)
 	{
-		SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", RoundToCeil((float(HP) / float(maxHP / 10)) * 255.9));
-		return;
+		if (g_cHealthbar.IntValue == 1 || g_cHealthbar.IntValue == 3)
+			SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", RoundToCeil((float(HP) / float(maxHP / 10)) * 255.9));
+		return Plugin_Continue;
 	}
 	
 	char classname[32];
@@ -1456,13 +1506,12 @@ public void UpdateBossHealth(int ent)
 			}
 		}
 	}
-	else
+	else if (currentHP <= 0)
 	{
-		if (HP <= -1)
-			SetEntProp(ent, Prop_Data, "m_takedamage", 0);
 		SetEntProp(ent, Prop_Data, "m_iHealth", 0);
+		SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
 	}
-	SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
+	return Plugin_Continue;
 }
 
 /* ---------------------------------ENTITY MANAGEMENT---------------------------------*/
@@ -1670,11 +1719,11 @@ public void SetupBossConfigs(const char[] sFile)
 		float fDamage = StringToFloat(sDamage);
 		
 		
-		if (!bHorseman && !bMonoculus && !bMerasmus && !bSkeleton)
+		/*if (!bHorseman && !bMonoculus && !bMerasmus && !bSkeleton)
 		{
 			LogError("[CBS] Boss type is undetermined, please check the boss type spelling again.");
 			SetFailState("[CBS] Boss type is undetermined, please check the boss type spelling again.");
-		}
+		}*/
 		
 		if (!bSkeleton)
 		{
