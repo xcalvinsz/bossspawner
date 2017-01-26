@@ -24,7 +24,12 @@ Version Log:
 	- Fixed a bug where monoculus would switch between models
 	- Fixed a bug where merasmus would switch between skins/colors
 	- Fixed a bug where healthbar type convar set to 0 or 2 might break the health bar tracking of bosses
-	- FINALLY fixed a bug where boss would need to be hit 1 MORE time after it hit 0 health.
+	- Fixed some translation code not correctly displaying right language
+	- Fixed a Call stack trace error on RemoveExistingBoss()
+	- FINALLY fixed a bug where boss would need to be hit 1 MORE time after it hit 0 health. (People should be able to get achievement now but that is untested.)
+	- Fixed issue with healthbar/hud having issue tracking when 2 or more bosses were active at the same time
+	- Added a death event chat notification of who killed what boss
+	- Gnome key is removed as it was annoying to maintain/keep track of, plugin will just remove the mini-skeletons on spawn
 	- Changed warhammer boss from chaos_bosspack config "WeaponModel" to Invisible
 	- Improved caching of bosses data into memory
 	- Improved timer that keeps track of boss lifetime
@@ -32,43 +37,10 @@ Version Log:
 	- Optimization of code
 	- General code cleanup
 
-v.5.0.2
-	- Fixed skeleton dispatching wrong blood color and spawning them on wrong team
-	- Added new glow colors to menu, orange, navy, pink, aquamarine, peachpuff, white
-v.5.0.1
-	- Fixed HUD text and bar not disapearing when bosses die
-v.5.0
-	- Fixed custom models causing bosses to stop moving and attacking (Uses bonemerge)
-	- Glow colors can be changed through spawn menu or through bossspawner_boss.cfg (spawn menu will override the config) or through command
-			Spawn menu - colored glows (Red Green Blue Yellow Purple Cyan Orange Pink Black)
-			Config - colored glows from RGB - Alpha values("0-255 0-255 0-255 0-255")(E.G "255 0 0 255" will make Red, "0 255 0 255" will make Green, "0 0 255 255" will make Blue)
-			Command - colored glows from RGB - !<bossname> <health> <size> <R,G,B,A> where RGBA values vary from 0-255, Example: !horseman 1000 1 255,0,255,255 (horseman will spawn with 1000 hp with purple glow)
-	- Changed sm_boss_vote as a percentage between 0-100 instead of amount of players
-	- May have fixed a call stack trace error on OnEntityDestroyed()
-	- Updated bossspawner_boss.cfg - Added colors and modified King and Warhammer "PosFix" values from 300 to 5 so it doesn't spawn way over than it should
-	- Removed bossspawner_vanilla.cfg - No longer supporting
-	- Updated the README.txt file instructions to be clearer
-	
-New default bosses: (Bosses that do not require any model/material downloads)
-	- Demobot
-	- Heavybot
-	- Pyrobot
-	- Scoutbot
-	- Soldierbot
-	- Spybot
-	- Sniperbot
-	- Medicbot
-	- Engineerbot
-	- Tank
-	- Ghost
-	- Sentrybuster
-	- Botkiller
-
 Known bugs: 
 	- Need to fix the vote percentage being wrong
 	- Need to fix translation files for vote ended
 	- Bug with healthbar not being removed when boss leaves by itself
-	- Death event notification
 	- multiple sounds played on death
 	- Horseman axe will NOT glow
 	- Can not set model on monoculus, plugin will error out if done so
@@ -109,8 +81,10 @@ int g_iBossCount, g_iInterval, g_iTotalVotes, g_iIndex, g_iIndexCmd;
 int g_iArgIndex, g_iSaveIndex;
 int g_iBossEntity = -1, g_iHealthbar = -1;
 float g_fPos[3], g_fkPos[3];
+int g_iAttacker;
+bool g_bSlayCommand;
 
-int g_iVotes[MAXPLAYERS+1];
+int g_iVotes[MAXPLAYERS + 1];
 
 public Plugin myinfo = 
 {
@@ -125,33 +99,33 @@ public void OnPluginStart()
 {
 	CreateConVar("sm_boss_version", PLUGIN_VERSION, "Custom Boss Spawner Version", FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
 	
-	g_cMode = 		CreateConVar("sm_boss_mode", 		"1", 	"Spawn mode for auto-spawning [0:Random | 1:Ordered | 2:Vote]");
-	g_cInterval = 	CreateConVar("sm_boss_interval", 	"300", 	"How many seconds until the next boss spawns?");
-	g_cMinplayers = CreateConVar("sm_boss_minplayers", 	"12", 	"How many players are needed before enabling auto-spawning?");
-	g_cHudx = 		CreateConVar("sm_boss_hud_x", 		"0.05", "X-Coordinate of the HUD display.");
-	g_cHudy = 		CreateConVar("sm_boss_hud_y", 		"0.05", "Y-Coordinate of the HUD display");
-	g_cHealthbar = 	CreateConVar("sm_healthbar_type", 	"3", 	"What kind of healthbar to display? [0:None | 1:HUDBar | 2:HUDText | 3:Both]");
-	g_cVote = 		CreateConVar("sm_boss_vote", 		"50", 	"How many people are needed to type !voteboss before a vote starts to spawn a boss? [0-100] as percentage");
+	g_cMode = CreateConVar("sm_boss_mode", "1", "Spawn mode for auto-spawning [0:Random | 1:Ordered | 2:Vote]");
+	g_cInterval = CreateConVar("sm_boss_interval", "300", "How many seconds until the next boss spawns?");
+	g_cMinplayers = CreateConVar("sm_boss_minplayers", "12", "How many players are needed before enabling auto-spawning?");
+	g_cHudx = CreateConVar("sm_boss_hud_x", "0.05", "X-Coordinate of the HUD display.");
+	g_cHudy = CreateConVar("sm_boss_hud_y", "0.05", "Y-Coordinate of the HUD display");
+	g_cHealthbar = CreateConVar("sm_healthbar_type", "3", "What kind of healthbar to display? [0:None | 1:HUDBar | 2:HUDText | 3:Both]");
+	g_cVote = CreateConVar("sm_boss_vote", "50", "How many people are needed to type !voteboss before a vote starts to spawn a boss? [0-100] as percentage");
 	
-	RegAdminCmd("sm_getcoords", Command_GetCoordinates, 	ADMFLAG_GENERIC, "Get the Coordinates of your cursor.");
-	RegAdminCmd("sm_forceboss", Command_ForceBossSpawn, 	ADMFLAG_GENERIC, "Forces a auto-spawning boss to spawn early.");
-	RegAdminCmd("sm_fb", 		Command_ForceBossSpawn, 	ADMFLAG_GENERIC, "Forces a auto-spawning boss to spawn early.");
-	RegAdminCmd("sm_spawnboss", Command_SpawnMenu,	ADMFLAG_GENERIC, "Opens a menu to spawn a boss.");
-	RegAdminCmd("sm_sb", 		Command_SpawnMenu,	ADMFLAG_GENERIC, "Opens a menu to spawn a boss.");
-	RegAdminCmd("sm_slayboss", 	Command_SlayBoss,	ADMFLAG_GENERIC, "Slay all active bosses on map.");
-	RegAdminCmd("sm_forcevote", Command_ForceVote,	ADMFLAG_GENERIC, "Start a vote, this is the same as !forceboss if sm_boss_mode was set to 2");
+	RegAdminCmd("sm_getcoords", Command_GetCoordinates, ADMFLAG_GENERIC, "Get the Coordinates of your cursor.");
+	RegAdminCmd("sm_forceboss", Command_ForceBossSpawn, ADMFLAG_GENERIC, "Forces a auto-spawning boss to spawn early.");
+	RegAdminCmd("sm_fb", Command_ForceBossSpawn, ADMFLAG_GENERIC, "Forces a auto-spawning boss to spawn early.");
+	RegAdminCmd("sm_spawnboss", Command_SpawnMenu, ADMFLAG_GENERIC, "Opens a menu to spawn a boss.");
+	RegAdminCmd("sm_sb", Command_SpawnMenu, ADMFLAG_GENERIC, "Opens a menu to spawn a boss.");
+	RegAdminCmd("sm_slayboss", Command_SlayBoss, ADMFLAG_GENERIC, "Slay all active bosses on map.");
+	RegAdminCmd("sm_forcevote", Command_ForceVote, ADMFLAG_GENERIC, "Start a vote, this is the same as !forceboss if sm_boss_mode was set to 2");
 	
 	RegConsoleCmd("sm_voteboss", Command_BossVote, "Start a vote, needs minimum amount of people to run this command to start a vote.  Follows sm_boss_vote");
 	
-	HookEvent("teamplay_round_start", 			Event_Round_Start,		EventHookMode_Pre);
-	HookEvent("pumpkin_lord_summoned", 			Event_Boss_Spawned, 	EventHookMode_Pre);
-	HookEvent("eyeball_boss_summoned", 			Event_Boss_Spawned, 	EventHookMode_Pre);
-	HookEvent("merasmus_summoned", 				Event_Boss_Spawned, 	EventHookMode_Pre);
-	HookEvent("pumpkin_lord_killed", 			Event_Boss_Death, 		EventHookMode_Pre);
-	HookEvent("eyeball_boss_killed", 			Event_Boss_Death, 		EventHookMode_Pre);
-	HookEvent("merasmus_killed", 				Event_Boss_Death, 		EventHookMode_Pre);
-	HookEvent("merasmus_escape_warning", 		Event_Merasmus_Escape, 	EventHookMode_Pre);
-	HookEvent("eyeball_boss_escape_imminent", 	Event_Monoculus_Escape,	EventHookMode_Pre);
+	HookEvent("teamplay_round_start", Event_Round_Start, EventHookMode_Pre);
+	HookEvent("pumpkin_lord_summoned", Event_Boss_Spawned, EventHookMode_Pre);
+	HookEvent("eyeball_boss_summoned", Event_Boss_Spawned, EventHookMode_Pre);
+	HookEvent("merasmus_summoned", Event_Boss_Spawned, EventHookMode_Pre);
+	HookEvent("pumpkin_lord_killed", Event_Boss_Death, EventHookMode_Pre);
+	HookEvent("eyeball_boss_killed", Event_Boss_Death, EventHookMode_Pre);
+	HookEvent("merasmus_killed", Event_Boss_Death, EventHookMode_Pre);
+	HookEvent("merasmus_escape_warning", Event_Merasmus_Escape, EventHookMode_Pre);
+	HookEvent("eyeball_boss_escape_imminent", Event_Monoculus_Escape, EventHookMode_Pre);
 	
 	HookUserMessage(GetUserMessageId("SayText2"), SayText2, true);
 	
@@ -175,7 +149,7 @@ public void OnPluginStart()
 	LoadTranslations("common.phrases");
 	LoadTranslations("bossspawner.phrases");
 	
-	AutoExecConfig(false, "bossspawner");  
+	AutoExecConfig(false, "bossspawner");
 }
 
 public void OnPluginEnd()
@@ -414,7 +388,7 @@ public Action Command_SlayBoss(int client, int args)
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	
+	g_bSlayCommand = true;
 	RemoveExistingBoss();
 	CReplyToCommand(client, "%t", "Boss_Slain");
 	return Plugin_Handled;
@@ -1030,7 +1004,10 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		EmitSoundToAll(sISound, _, _, _, _, 1.0);
 		
 	ReplaceString(sName, sizeof(sName), "_", " ");
-	CPrintToChatAll("%t", "Boss_Spawn", sName);
+	
+	for (int i = 1; i <= MaxClients; i++)
+		if (IsClientInGame(i))
+			CPrintToChat(i, "%t", "Boss_Spawn", sName);
 	
 	if (g_iArgIndex == 1)
 		g_iIndex = g_iSaveIndex;
@@ -1107,7 +1084,10 @@ public Action Timer_Remove(Handle hTimer, DataPack hPack)
 			char sName[64];
 			StringMap HashMap = g_iArray.Get(hPack.ReadCell());
 			HashMap.GetString("Name", sName, sizeof(sName));
-			CPrintToChatAll("%t", "Boss_Left", sName);
+			
+			for (int i = 1; i <= MaxClients; i++)
+				if (IsClientInGame(i))
+					CPrintToChat(i, "%t", "Boss_Left", sName);
 			
 			hPack.Reset();
 			hPack.ReadCell();
@@ -1162,29 +1142,31 @@ public Action Timer_Healthbar(Handle hTimer, any ref)
 	if (g_cHealthbar.IntValue == 0 || g_cHealthbar.IntValue == 1)
 		return Plugin_Continue;
 		
-	if (g_iBossEntity != -1 && IsValidEntity(g_iBossEntity))
+	if (!IsValidEntity(g_iBossEntity))
+		return Plugin_Continue;
+		
+	int health = GetEntProp(g_iBossEntity, Prop_Data, "m_iHealth");
+	int max_health = GetEntProp(g_iBossEntity, Prop_Data, "m_iMaxHealth");
+	int current_health = RoundFloat(health - max_health * 0.9);
+	
+	float max_threshold = max_health * 0.1 * 0.65;
+	float min_threshold = max_health * 0.1 * 0.25;
+	
+	if (current_health > max_threshold) 
+		SetHudTextParams(0.46, 0.12, 0.5, 0, 255, 0, 255);
+	else if (min_threshold < current_health < max_threshold) 
+		SetHudTextParams(0.46, 0.12, 0.5, 255, 255, 0, 255);
+	else if (0 < current_health < min_threshold)
+		SetHudTextParams(0.46, 0.12, 0.5, 255, 0, 0, 255);
+	else
 	{
-		int HP = GetEntProp(g_iBossEntity, Prop_Data, "m_iHealth");
-		int maxHP = GetEntProp(g_iBossEntity, Prop_Data, "m_iMaxHealth");
-		int currentHP = RoundFloat(HP - maxHP * 0.9);
-		
-		if (currentHP > maxHP*0.1*0.65) 
-			SetHudTextParams(0.46, 0.12, 0.5, 0, 255, 0, 255);
-		else if (maxHP*0.1*0.25 < currentHP < maxHP*0.1*0.65) 
-			SetHudTextParams(0.46, 0.12, 0.5, 255, 255, 0, 255);
-		else 
-			SetHudTextParams(0.46, 0.12, 0.5, 255, 0, 0, 255);
-			
-		if (currentHP <= 0) 
-		{
-			SetHudTextParams(0.46, 0.12, 0.5, 0, 0, 0, 0);
-			currentHP = 0;
-		}
-		
-		for (int i = 1; i <= MaxClients; i++)
-			if (IsClientInGame(i)) {
-				ShowHudText(i, -1, "HP: %d", currentHP);
-		}
+		SetHudTextParams(0.46, 0.12, 0.5, 0, 0, 0, 0);
+		current_health = 0;
+	}
+	
+	for (int i = 1; i <= MaxClients; i++)
+		if (IsClientInGame(i)) {
+			ShowHudText(i, -1, "HP: %d", current_health);
 	}
 	return Plugin_Continue;
 }
@@ -1203,8 +1185,9 @@ void RemoveExistingBoss()
 			
 	while ((ent = FindEntityByClassname(ent, "tf_zombie")) != -1)
 		AcceptEntityInput(ent, "Kill");
-			
-	SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
+	
+	if (IsValidEntity(g_iHealthbar))
+		SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
 }
 
 void SetSize(float value, int ent)
@@ -1284,7 +1267,10 @@ void ResetTimer()
 {
 	delete g_cTimer;
 	CreateCountdownTimer();
-	CPrintToChatAll("%t", "Time", g_cInterval.IntValue);
+	
+	for (int i = 1; i <= MaxClients; i++)
+		if (IsClientInGame(i))
+			CPrintToChat(i, "%t", "Time", g_cInterval.IntValue);
 }
 
 /* ---------------------------------TIMER & HUD CORE----------------------------------*/
@@ -1298,11 +1284,10 @@ public void OnEntityCreated(int ent, const char[] classname)
 		
 	if (StrEqual(classname, "monster_resource"))
 		g_iHealthbar = ent;		
-	else if ((StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) || StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON)))
+	else if (StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) || StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON))
 	{
 		g_iBossEntity = ent;
 		SDKHook(ent, SDKHook_OnTakeDamage, Hook_BossTakeDamage);
-		//RequestFrame(UpdateBossHealth, EntIndexToEntRef(ent));
 		if (g_cHealthbar.IntValue == 1 || g_cHealthbar.IntValue == 3)
 			SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 2559);
 	}
@@ -1312,73 +1297,73 @@ public void OnEntityCreated(int ent, const char[] classname)
 
 public void OnEntityDestroyed(int ent)
 {
-	if (!g_bEnabled)
+	if (!g_bEnabled || !IsValidEntity(ent) || ent != g_iBossEntity)
 		return;
 		
-	if (!IsValidEntity(ent)) 
-		return;
-		
-	if (ent == g_iBossEntity)
-	{
-		g_iBossEntity = -1;
-		for (int i = 0; i < 2048; i++) 
-		{
-			if (!IsValidEntity(i)) 
-				continue;
-				
-			if (i == ent)
-				continue;
-			else 
-			{
-				g_iBossEntity = i;
-				break;
-			}
-		}
-		if (g_iBossEntity != -1) 
-			SDKHook(g_iBossEntity, SDKHook_OnTakeDamage, Hook_BossTakeDamage);
-		else
-			SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
-	}
-	
 	for (int i = g_iArrayData.Length-1; i >= 0; i--)
 	{
 		ArrayList dReference = g_iArrayData.Get(i);
 		int dEnt = EntRefToEntIndex(dReference.Get(1));
 		
-		if (ent == dEnt)
-		{
-			DataPack dMax = dReference.Get(0);
-			dMax.Reset();
-			int iMax = dMax.ReadCell();
-			int index = dReference.Get(2);
-			int timed = dReference.Get(3);
-			iMax -= 1;
-			dMax.Reset();
-			dMax.WriteCell(iMax);
-			dReference.Set(0, dMax);
-			g_iArrayData.Erase(i);
+		if (ent != dEnt)
+			continue;
+		
+		DataPack dMax = dReference.Get(0);
+		dMax.Reset();
+		int iMax = dMax.ReadCell();
+		int index = dReference.Get(2);
+		int timed = dReference.Get(3);
+		iMax -= 1;
+		dMax.Reset();
+		dMax.WriteCell(iMax);
+		dReference.Set(0, dMax);
+		
+		if (timed)
+			g_iBossCount--;
 			
-			if (timed)
-				g_iBossCount--;
+		if (iMax == 0)
+		{
+			StringMap HashMap = g_iArray.Get(index);
+			char sDSound[256];
+			HashMap.GetString("DeathSound", sDSound, sizeof(sDSound));
+			
+			if (!StrEqual(sDSound, "none", false))
+				EmitSoundToAll(sDSound, _, _, _, _, 1.0);
 				
-			if (iMax == 0)
+			if (timed && GetClientCount(true) >= g_cMinplayers.IntValue && g_iBossCount == 0)
+				ResetTimer();
+			
+			if (!g_bSlayCommand)
 			{
-				StringMap HashMap = g_iArray.Get(index);
-				char sDSound[256];
-				HashMap.GetString("DeathSound", sDSound, sizeof(sDSound));
-				
-				if (!StrEqual(sDSound, "none", false))
-					EmitSoundToAll(sDSound, _, _, _, _, 1.0);
-					
-				if (timed && GetClientCount(true) >= g_cMinplayers.IntValue && g_iBossCount == 0)
-					ResetTimer();
-					
-				delete dMax;
+				char sName[64];
+				HashMap.GetString("Name", sName, sizeof(sName));
+				CPrintToChatAll("{green}[CBS] {darkslateblue}%N has slained the %s", g_iAttacker, sName);
 			}
-			delete dReference;
-			break;
+			
+			delete dMax;
 		}
+		g_iArrayData.Erase(i);
+		delete dReference;
+		break;
 	}
+	
+	PrintToChatAll("size: %d", g_iArrayData.Length);
+		
+	if (g_iArrayData.Length < 1)
+	{
+		g_iBossEntity = -1;
+		SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
+		return;
+	}
+	
+	ArrayList boss_array = g_iArrayData.Get(0);
+	g_iBossEntity = EntRefToEntIndex(boss_array.Get(1));
+
+	int HP = GetEntProp(g_iBossEntity, Prop_Data, "m_iHealth");
+	int maxHP = GetEntProp(g_iBossEntity, Prop_Data, "m_iMaxHealth");
+	
+	if (g_cHealthbar.IntValue == 1 || g_cHealthbar.IntValue == 3)
+		SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", RoundToCeil((float(HP) / float(maxHP / 10)) * 255.9));
 }
 
 public void OnPropSpawn(any ref)
@@ -1426,14 +1411,10 @@ public void OnPropSpawn(any ref)
 
 void FindHealthBar()
 {
-	g_iHealthbar = FindEntityByClassname(-1, "monster_resource");
-	
-	if (g_iHealthbar == -1)
+	if ((g_iHealthbar = FindEntityByClassname(-1, "monster_resource")) == -1)
 	{
 		g_iHealthbar = CreateEntityByName("monster_resource");
-		
-		if (g_iHealthbar != -1)
-			DispatchSpawn(g_iHealthbar);
+		DispatchSpawn(g_iHealthbar);
 	}
 }
 
@@ -1473,10 +1454,12 @@ public Action Hook_BossTakeDamage(int ent, int &attacker, int &inflictor, float 
 {
 	if (g_iHealthbar == -1)
 		return Plugin_Continue;
-	
+		
 	int HP = GetEntProp(ent, Prop_Data, "m_iHealth");
 	int maxHP = GetEntProp(ent, Prop_Data, "m_iMaxHealth");
 	float currentHP = (HP - maxHP * 0.9) - damage;
+	
+	g_iBossEntity = ent;
 	
 	if (currentHP > 0.0)
 	{
@@ -1485,32 +1468,26 @@ public Action Hook_BossTakeDamage(int ent, int &attacker, int &inflictor, float 
 		return Plugin_Continue;
 	}
 	
-	char classname[32];
-	GetEntityClassname(ent, classname, sizeof(classname));
+	g_iAttacker = attacker;
+	g_bSlayCommand = false;
+	SetEntProp(ent, Prop_Data, "m_iHealth", 0);
+	//SDKUnhook(ent, SDKHook_OnTakeDamage, Hook_BossTakeDamage);
+	//SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
 	
-	if (StrEqual(classname, SKELETON))
+	/*
+	for (int i = g_iArrayData.Length-1; i >= 0; i--)
 	{
-		for (int i = g_iArrayData.Length-1; i >= 0; i--)
+		ArrayList dReference = g_iArrayData.Get(i);
+		int dEnt = EntRefToEntIndex(dReference.Get(1));
+		if (ent == dEnt) 
 		{
-			ArrayList dReference = g_iArrayData.Get(i);
-			int dEnt = EntRefToEntIndex(dReference.Get(1));
-			if (ent == dEnt) 
-			{
-				int dIndex = dReference.Get(2);
-				int iGnome;
-				StringMap HashMap = g_iArray.Get(dIndex);
-				HashMap.GetValue("Gnome", iGnome);
-				if (!iGnome)
-					AcceptEntityInput(ent, "kill");
-				break;
-			}
+			int dIndex = dReference.Get(2);
+			StringMap HashMap = g_iArray.Get(dIndex);
+				
+			SDKUnhook(ent, SDKHook_OnTakeDamage, Hook_BossTakeDamage);
+			return Plugin_Continue;
 		}
-	}
-	else if (currentHP <= 0)
-	{
-		SetEntProp(ent, Prop_Data, "m_iHealth", 0);
-		SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
-	}
+	}*/
 	return Plugin_Continue;
 }
 
@@ -1623,7 +1600,10 @@ public void SetupMapConfigs(const char[] sFile)
 		if (GetClientCount(true) >= g_cMinplayers.IntValue)
 		{
 			CreateCountdownTimer();
-			CPrintToChatAll("%t", "Time", g_cInterval.IntValue);
+			
+			for (int i = 1; i <= MaxClients; i++)
+				if (IsClientInGame(i))
+					CPrintToChat(i, "%t", "Time", g_cInterval.IntValue);
 		}
 	}
 	else if (mapEnabled == 0)
@@ -1654,7 +1634,7 @@ public void SetupBossConfigs(const char[] sFile)
 	
 	g_iArray.Clear();
 	char sName[64], sModel[256], sType[32], sBase[16], sScale[16], sWModel[256], sSize[16], sGlow[32], sPosFix[32];
-	char sLifetime[32], sPosition[32], sHorde[8], sColor[16], sISound[256], sDSound[256], sHModel[256], sGnome[8];
+	char sLifetime[32], sPosition[32], sHorde[8], sColor[16], sISound[256], sDSound[256], sHModel[256];
 	char sHatPosFix[32], sHatSize[16], sDamage[32];
 	
 	do
@@ -1675,7 +1655,6 @@ public void SetupBossConfigs(const char[] sFile)
 		KvGetString(kv, "IntroSound", sISound, sizeof(sISound), INTRO_SND);
 		KvGetString(kv, "DeathSound", sDSound, sizeof(sDSound), DEATH_SND);
 		KvGetString(kv, "HatModel", sHModel, sizeof(sHModel), SNULL);
-		KvGetString(kv, "Gnome", sGnome, sizeof(sGnome), "0");
 		KvGetString(kv, "HatPosFix", sHatPosFix, sizeof(sHatPosFix), "0.0");
 		KvGetString(kv, "HatSize", sHatSize, sizeof(sHatSize), "1.0");
 		KvGetString(kv, "Damage", sDamage, sizeof(sDamage), "100.0");
@@ -1713,17 +1692,16 @@ public void SetupBossConfigs(const char[] sFile)
 		else
 			iColor = 4;
 			
-		int iGnome = StringToInt(sGnome);
 		float fHatPosFix = StringToFloat(sHatPosFix);
 		float fHatSize = StringToFloat(sHatSize);
 		float fDamage = StringToFloat(sDamage);
 		
 		
-		/*if (!bHorseman && !bMonoculus && !bMerasmus && !bSkeleton)
+		if (!bHorseman && !bMonoculus && !bMerasmus && !bSkeleton)
 		{
 			LogError("[CBS] Boss type is undetermined, please check the boss type spelling again.");
 			SetFailState("[CBS] Boss type is undetermined, please check the boss type spelling again.");
-		}*/
+		}
 		
 		if (!bSkeleton)
 		{
@@ -1736,11 +1714,6 @@ public void SetupBossConfigs(const char[] sFile)
 			{
 				LogError("[CBS] Color mode only works for boss type: tf_zombie.");
 				SetFailState("[CBS] Color mode only works for boss type: tf_zombie.");
-			}
-			if (iGnome != 0)
-			{
-				LogError("[CBS] Gnome only works for boss type: tf_zombie.");
-				SetFailState("[CBS] Gnome only works for boss type: tf_zombie.");
 			}
 		}
 		
@@ -1756,6 +1729,12 @@ public void SetupBossConfigs(const char[] sFile)
 		
 		if (bMerasmus)
 			SetMerasmusLifetime(9999999);
+			
+		if (bSkeleton && fSize < 1.0)
+		{
+			LogError("[CBS] For tf_zombie type, size can not be lower than 1.0.");
+			SetFailState("[CBS] For tf_zombie type, size can not be lower than 1.0");
+		}
 		
 		if (strlen(sWModel))
 		{
@@ -1794,7 +1773,6 @@ public void SetupBossConfigs(const char[] sFile)
 		HashMap.SetString("IntroSound", sISound, false);
 		HashMap.SetString("DeathSound", sDSound, false);
 		HashMap.SetString("HatModel", sHModel, false);
-		HashMap.SetValue("Gnome", iGnome, false);
 		HashMap.SetValue("HatPosFix", fHatPosFix, false);
 		HashMap.SetValue("HatSize", fHatSize, false);
 		HashMap.SetValue("Damage", fDamage, false);
