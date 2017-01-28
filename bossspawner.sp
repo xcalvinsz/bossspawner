@@ -26,6 +26,7 @@ Version Log:
 	- Fixed a bug where healthbar type convar set to 0 or 2 might break the health bar tracking of bosses
 	- Fixed some translation code not correctly displaying right language
 	- Fixed a Call stack trace error on RemoveExistingBoss()
+	- Fixed bug with total votes would be wrong if too many people disconnected
 	- FINALLY fixed a bug where boss would need to be hit 1 MORE time after it hit 0 health. (People should be able to get achievement now but that is untested.)
 	- Fixed issue with healthbar/hud having issue tracking when 2 or more bosses were active at the same time
 	- Added a death event chat notification of who killed what boss
@@ -40,9 +41,8 @@ Version Log:
 Known bugs: 
 	- Need to fix the vote percentage being wrong
 	- Need to fix translation files for vote ended
-	- Bug with healthbar not being removed when boss leaves by itself
 	- multiple sounds played on death
-	- Horseman axe will NOT glow
+	- There seems to be an engine limit of how many skeletons can spawn which is 30, spawning more will cause #skeletons-30 to die
 	- Can not set model on monoculus, plugin will error out if done so
 	- Botkiller and Ghost can not be resized
 	- When tf_skeleton with a hat attacks you while standing still, his hat model may freeze until he starts moving
@@ -143,8 +143,8 @@ public void OnPluginStart()
 	g_cInterval.AddChangeHook(OnConvarChanged);
 	
 	for (int i = 1; i <= MaxClients; i++)
-		if(IsClientInGame(i))
-			SDKHook(i, SDKHook_OnTakeDamage, Hook_ClientTakeDamage);
+		if (IsClientInGame(i))
+			OnClientPostAdminCheck(i);
 	
 	LoadTranslations("common.phrases");
 	LoadTranslations("bossspawner.phrases");
@@ -195,8 +195,11 @@ public void OnClientDisconnect_Post(int client)
 {
 	if (GetClientCount(true) < g_cMinplayers.IntValue)
 		delete g_cTimer;
-	g_iVotes[client] = 0;
-	g_iTotalVotes--;
+	if (g_iVotes[client])
+	{
+		g_iVotes[client] = 0;
+		g_iTotalVotes--;
+	}
 }
 
 public void OnConvarChanged(ConVar convar, char[] oldValue, char[] newValue)
@@ -893,12 +896,8 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		SetSize(iSize, ent);
 		
 		SetEntProp(ent, Prop_Data, "m_iHealth", sHealth);
-		SetEntProp(ent, Prop_Data, "m_iMaxHealth",sHealth); 
-		
-		//SetEntProp		(ent, Prop_Data, "m_iTeamNum", 		(strcmp(sType, MONOCULUS) == 0 || strcmp(sType, SKELETON) == 0) ? 5 : 0);
+		SetEntProp(ent, Prop_Data, "m_iMaxHealth", sHealth); 
 		SetEntProp(ent, Prop_Data, "m_iTeamNum", (StrEqual(sType, MONOCULUS) || StrEqual(sType, SKELETON)) ? 5 : 0);
-		//speed don't work! -.-
-		//SetEntPropFloat	(ent, Prop_Data, "m_flSpeed", 	0.0);
 		
 		int attach = ent;
 		char targetname[128];
@@ -943,22 +942,16 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		
 		if (timed) 
 			g_iBossCount++;
-			
-		/*if (i == 0)
+		
+		if (!i)
 		{
 			DataPack hPack;
-			CreateDataTimer(1.0, Timer_Notification, hPack, TIMER_REPEAT);
+			CreateDataTimer(1.0, Timer_Remove, hPack, TIMER_REPEAT);
 			hPack.WriteCell(EntIndexToEntRef(ent));
-			hPack.WriteCell(iLifetime);
+			hPack.WriteCell(iLifetime-1);
 			hPack.WriteCell(index);
-		}*/
-		
-		DataPack hPack;
-		CreateDataTimer(1.0, Timer_Remove, hPack, TIMER_REPEAT);
-		hPack.WriteCell(EntIndexToEntRef(ent));
-		hPack.WriteCell(iLifetime);
-		hPack.WriteCell(1);
-		hPack.WriteCell(index);
+		}
+		SetEntitySelfDestruct(ent, float(iLifetime)+0.1);
 		
 		if (strlen(sHModel) != 0)
 		{
@@ -990,14 +983,6 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			//hatpos[0] += -5.0;
 			TeleportEntity(hat, hatpos, NULL_VECTOR, NULL_VECTOR);
 		}
-		
-		//SDKHook(ent, SDKHook_Think, Hook_PreThink);
-		//DataPack jPack = new DataPack();
-		//jPack.WriteCell(EntIndexToEntRef(ent));
-		//jPack.WriteString(sGlow);
-		//jPack.WriteString(sGlowValue);
-		//jPack.WriteCell(index);
-		//RequestFrame(Frame_GetWeapon, jPack);
 	}
 	
 	if (!StrEqual(sISound, "none", false))
@@ -1019,53 +1004,15 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 			g_iIndex = 0;
 	}
 }
-/*
-public void Hook_PreThink(int ent)
+
+public void SetEntitySelfDestruct(int entity, float duration)
 {
-	SetEntPropFloat(ent, Prop_Data, "m_flSpeed", 0.0);
-}*/
-/*
-public void Frame_GetWeapon(DataPack jPack)
-{
-	jPack.Reset();
-	int ent = EntRefToEntIndex(jPack.ReadCell());
-	char sGlow[32], sGlowValue[32];
-	jPack.ReadString(sGlow, 32);
-	jPack.ReadString(sGlowValue, 32);
-	PrintToChatAll("1");
-	int weapon = GetEntPropEnt(ent, Prop_Send, "m_hActiveWeapon");
-	PrintToChatAll("weapon: %d", weapon);
-	if (weapon == -1)
-		return;
-	PrintToChatAll("2");
-	float pos[3];
-	GetEntPropVector(weapon, Prop_Send, "m_vecOrigin", pos);
-	
-	char targetname[128];
-	Format(targetname, sizeof(targetname), "axeweapon%d", GetRandomInt(2000, 10000));
-	PrintToChatAll("3");
-	if (!sGlowValue[0])
-		SetGlow(ent, targetname, pos, sGlow);
-	else
-		SetGlow(ent, targetname, pos, sGlowValue);
-		
-	int index = jPack.ReadCell();
-	PrintToChatAll("4");
-	char sWModel[256];
-	StringMap HashMap = g_iArray.Get(index);
-	HashMap.GetString("WeaponModel", sWModel, sizeof(sWModel));
-	PrintToChatAll("model: %s", sWModel);
-	if (strlen(sWModel) != 0)
-	{
-		if (StrEqual(sWModel, "Invisible"))
-			SetEntProp(weapon, Prop_Send, "m_fEffects", EF_NODRAW);
-		else
-		{
-			SetEntityModel(weapon, sWModel);
-			//SetEntPropEnt(parent, Prop_Send, "m_hActiveWeapon", ent);
-		}
-	}
-}*/
+	char output[64]; 
+	Format(output, sizeof(output), "OnUser1 !self:kill::%.1f:1", duration);
+	SetVariantString(output);
+	AcceptEntityInput(entity, "AddOutput"); 
+	AcceptEntityInput(entity, "FireUser1");
+}
 
 public Action Timer_Remove(Handle hTimer, DataPack hPack)
 {
@@ -1074,67 +1021,31 @@ public Action Timer_Remove(Handle hTimer, DataPack hPack)
 	
 	if (!IsValidEntity(ent))
 		return Plugin_Stop;
-		
-	int iCounter = hPack.ReadCell();
 	
-	if (iCounter <= 0)
+	int counter = hPack.ReadCell();
+	
+	if (counter <= 0)
 	{
-		if (hPack.ReadCell())
-		{
-			char sName[64];
-			StringMap HashMap = g_iArray.Get(hPack.ReadCell());
-			HashMap.GetString("Name", sName, sizeof(sName));
-			
-			for (int i = 1; i <= MaxClients; i++)
-				if (IsClientInGame(i))
-					CPrintToChat(i, "%t", "Boss_Left", sName);
-			
-			hPack.Reset();
-			hPack.ReadCell();
-			hPack.ReadCell();
-			hPack.WriteCell(0);
-		}
+		char sName[64];
+		StringMap HashMap = g_iArray.Get(hPack.ReadCell());
+		HashMap.GetString("Name", sName, sizeof(sName));
 		
-		AcceptEntityInput(ent, "Kill");
+		g_bSlayCommand = true;
+		
+		for (int i = 1; i <= MaxClients; i++)
+			if (IsClientInGame(i))
+				CPrintToChat(i, "%t", "Boss_Left", sName);
+				
 		return Plugin_Stop;
 	}
 	else
 	{
-		iCounter -= 1;
 		hPack.Reset();
 		hPack.ReadCell();
-		hPack.WriteCell(iCounter);
+		hPack.WriteCell(--counter);
 		return Plugin_Continue;
 	}
 }
-/*
-public Action Timer_Notification(Handle hTimer, DataPack hPack)
-{
-	hPack.Reset();
-	int ent = EntRefToEntIndex(hPack.ReadCell());
-	
-	if (!IsValidEntity(ent))
-		return Plugin_Stop;
-		
-	int iCounter = hPack.ReadCell();
-	if (iCounter <= 0)
-	{
-		int index = hPack.ReadCell();
-		char sName[64];
-		StringMap HashMap = g_iArray.Get(index);
-		HashMap.GetString("Name", sName, sizeof(sName));
-		CPrintToChatAll("%t", "Boss_Left", sName);
-		return Plugin_Stop;
-	}
-	else
-	{
-		iCounter -= 1;
-		hPack.Reset();
-		hPack.ReadCell();
-		hPack.WriteCell(iCounter);
-		return Plugin_Continue;
-	}
-}*/
 
 //Instead of hooking to sdkhook_takedamage, we use a 0.5 timer because of hud overloading when taking damage
 public Action Timer_Healthbar(Handle hTimer, any ref)
@@ -1165,28 +1076,22 @@ public Action Timer_Healthbar(Handle hTimer, any ref)
 	}
 	
 	for (int i = 1; i <= MaxClients; i++)
-		if (IsClientInGame(i)) {
+		if (IsClientInGame(i))
 			ShowHudText(i, -1, "HP: %d", current_health);
-	}
 	return Plugin_Continue;
 }
 
 void RemoveExistingBoss()
 {
-	int ent;
-	while ((ent = FindEntityByClassname(ent, "headless_hatman")) != -1)
-		AcceptEntityInput(ent, "Kill");
-			
-	while ((ent = FindEntityByClassname(ent, "eyeball_boss")) != -1)
-		AcceptEntityInput(ent, "Kill");
-			
-	while ((ent = FindEntityByClassname(ent, "merasmus")) != -1)
-		AcceptEntityInput(ent, "Kill");
-			
-	while ((ent = FindEntityByClassname(ent, "tf_zombie")) != -1)
-		AcceptEntityInput(ent, "Kill");
-	
-	if (IsValidEntity(g_iHealthbar))
+	int ent; char classname[32];
+	while ((ent = FindEntityByClassname(ent, "*")) != -1)
+	{
+		GetEntityClassname(ent, classname, 32);
+		if (StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) || StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON))
+			AcceptEntityInput(ent, "Kill");
+	}
+		
+	if (g_iHealthbar != -1)
 		SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
 }
 
@@ -1245,21 +1150,18 @@ public Action Timer_HUDCounter(Handle hTimer)
 {
 	for (int i = 1; i <= MaxClients; i++)
 	{
-		if(IsClientInGame(i))
-		{
-			SetHudTextParams(g_cHudx.FloatValue, g_cHudy.FloatValue, 1.0, 255, 255, 255, 255);
-			ShowHudText(i, -1, "Boss: %d seconds", g_iInterval);
-		}
+		if(!IsClientInGame(i))
+			continue;
+		SetHudTextParams(g_cHudx.FloatValue, g_cHudy.FloatValue, 1.0, 255, 255, 255, 255);
+		ShowHudText(i, -1, "Boss: %d seconds", g_iInterval);
 	}
 	
-	if (g_iInterval <= 0)
+	if (g_iInterval-- <= 0)
 	{
 		SpawnBoss();
 		g_cTimer = null;
 		return Plugin_Stop;
 	}
-	
-	g_iInterval--;
 	return Plugin_Continue;
 }
 
@@ -1297,9 +1199,14 @@ public void OnEntityCreated(int ent, const char[] classname)
 
 public void OnEntityDestroyed(int ent)
 {
-	if (!g_bEnabled || !IsValidEntity(ent) || ent != g_iBossEntity)
+	if (!g_bEnabled)
 		return;
 		
+	char classname[32];
+	GetEntityClassname(ent, classname, 32);
+	if (!StrEqual(classname, HORSEMAN) && !StrEqual(classname, MONOCULUS) && !StrEqual(classname, MERASMUS) && !StrEqual(classname, SKELETON))
+		return;
+
 	for (int i = g_iArrayData.Length-1; i >= 0; i--)
 	{
 		ArrayList dReference = g_iArrayData.Get(i);
@@ -1307,6 +1214,34 @@ public void OnEntityDestroyed(int ent)
 		
 		if (ent != dEnt)
 			continue;
+		
+		if (g_iBossEntity == ent)
+		{
+			g_iBossEntity = -1;
+			int boss;
+			while ((boss = FindEntityByClassname(boss, "*")) != -1)
+			{
+				GetEntityClassname(boss, classname, 32);
+				if (StrEqual(classname, HORSEMAN) || StrEqual(classname, MONOCULUS) || StrEqual(classname, MERASMUS) || StrEqual(classname, SKELETON))
+				{
+					if (boss == ent)
+						continue;
+					g_iBossEntity = boss;
+					break;
+				}
+			}
+			
+			if (g_iBossEntity == -1)
+				SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
+			else
+			{
+				int HP = GetEntProp(g_iBossEntity, Prop_Data, "m_iHealth");
+				int maxHP = GetEntProp(g_iBossEntity, Prop_Data, "m_iMaxHealth");
+				
+				if (g_cHealthbar.IntValue == 1 || g_cHealthbar.IntValue == 3)
+					SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", RoundToCeil((float(HP) / float(maxHP / 10)) * 255.9));
+			}
+		}
 		
 		DataPack dMax = dReference.Get(0);
 		dMax.Reset();
@@ -1339,31 +1274,12 @@ public void OnEntityDestroyed(int ent)
 				HashMap.GetString("Name", sName, sizeof(sName));
 				CPrintToChatAll("{green}[CBS] {darkslateblue}%N has slained the %s", g_iAttacker, sName);
 			}
-			
 			delete dMax;
 		}
 		g_iArrayData.Erase(i);
 		delete dReference;
 		break;
 	}
-	
-	PrintToChatAll("size: %d", g_iArrayData.Length);
-		
-	if (g_iArrayData.Length < 1)
-	{
-		g_iBossEntity = -1;
-		SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
-		return;
-	}
-	
-	ArrayList boss_array = g_iArrayData.Get(0);
-	g_iBossEntity = EntRefToEntIndex(boss_array.Get(1));
-
-	int HP = GetEntProp(g_iBossEntity, Prop_Data, "m_iHealth");
-	int maxHP = GetEntProp(g_iBossEntity, Prop_Data, "m_iMaxHealth");
-	
-	if (g_cHealthbar.IntValue == 1 || g_cHealthbar.IntValue == 3)
-		SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", RoundToCeil((float(HP) / float(maxHP / 10)) * 255.9));
 }
 
 public void OnPropSpawn(any ref)
@@ -1411,7 +1327,7 @@ public void OnPropSpawn(any ref)
 
 void FindHealthBar()
 {
-	if ((g_iHealthbar = FindEntityByClassname(-1, "monster_resource")) == -1)
+	if ((g_iHealthbar = FindEntityByClassname(g_iHealthbar, "monster_resource")) == -1)
 	{
 		g_iHealthbar = CreateEntityByName("monster_resource");
 		DispatchSpawn(g_iHealthbar);
@@ -1471,23 +1387,12 @@ public Action Hook_BossTakeDamage(int ent, int &attacker, int &inflictor, float 
 	g_iAttacker = attacker;
 	g_bSlayCommand = false;
 	SetEntProp(ent, Prop_Data, "m_iHealth", 0);
-	//SDKUnhook(ent, SDKHook_OnTakeDamage, Hook_BossTakeDamage);
-	//SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
 	
-	/*
-	for (int i = g_iArrayData.Length-1; i >= 0; i--)
-	{
-		ArrayList dReference = g_iArrayData.Get(i);
-		int dEnt = EntRefToEntIndex(dReference.Get(1));
-		if (ent == dEnt) 
-		{
-			int dIndex = dReference.Get(2);
-			StringMap HashMap = g_iArray.Get(dIndex);
-				
-			SDKUnhook(ent, SDKHook_OnTakeDamage, Hook_BossTakeDamage);
-			return Plugin_Continue;
-		}
-	}*/
+	char classname[32];
+	GetEntityClassname(ent, classname, sizeof(classname));
+	
+	if (StrEqual(classname, SKELETON))
+		AcceptEntityInput(ent, "kill");
 	return Plugin_Continue;
 }
 
@@ -1566,15 +1471,13 @@ public void SetupMapConfigs(const char[] sFile)
 	float tpos[3];
 	if (strlen(sPosition) != 0)
 	{
-		int ent;
+		int ent = -1;
 		while ((ent = FindEntityByClassname(ent, "info_target")) != -1)
 		{
 			char strName[32];
 			GetEntPropString(ent, Prop_Data, "m_iName", strName, sizeof(strName));
 			if (StrContains(strName, "spawn_loot") != -1)
-			{
 				AcceptEntityInput(ent, "Kill");
-			}
 		}
 		
 		char sPos[3][16];
