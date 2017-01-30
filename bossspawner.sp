@@ -86,6 +86,96 @@ bool g_bSlayCommand;
 
 int g_iVotes[MAXPLAYERS + 1];
 
+methodmap Reference < ArrayStack
+{	
+	public Reference(int a)
+	{
+		ArrayStack stack = new ArrayStack();
+		stack.Push(a);
+		return view_as<Reference>(stack);
+	}
+	
+	property int Value
+	{
+		public get()
+		{
+			int a = this.Pop();
+			this.Push(a);
+			return a;
+		}
+		public set(int a)
+		{
+			this.Pop();
+			this.Push(a);
+		}
+	}
+}
+
+methodmap BossPack < DataPack
+{
+	public BossPack (int entity, Reference reference, int index, int timed)
+	{
+		DataPack pack = new DataPack();
+		pack.WriteCell(EntIndexToEntRef(entity));
+		pack.WriteCell(reference);
+		pack.WriteCell(index);
+		pack.WriteCell(timed); 
+		return view_as<BossPack>(pack);
+	}
+	property int Entity
+	{
+		public set(int entity)
+		{
+			this.Reset();
+			this.WriteCell(EntIndexToEntRef(entity));
+		}
+		public get()
+		{
+			this.Reset();
+			return EntRefToEntIndex(this.ReadCell());
+		}
+	}
+	property Reference Ref
+	{
+		public set(Reference reference)
+		{
+			this.Reset(); this.ReadCell();
+			this.WriteCell(reference);
+		}
+		public get()
+		{
+			this.Reset(); this.ReadCell();
+			return this.ReadCell();
+		}
+	}
+	property int Index
+	{
+		public set(int index)
+		{
+			this.Reset(); this.ReadCell(); this.ReadCell();
+			this.WriteCell(index);
+		}
+		public get()
+		{
+			this.Reset(); this.ReadCell(); this.ReadCell();
+			return this.ReadCell();
+		}
+	}
+	property bool Timed
+	{
+		public set(bool timed)
+		{
+			this.Reset(); this.ReadCell(); this.ReadCell(); this.ReadCell();
+			this.WriteCell(timed);
+		}
+		public get()
+		{
+			this.Reset(); this.ReadCell(); this.ReadCell(); this.ReadCell();
+			return this.ReadCell();
+		}
+	}
+}
+
 public Plugin myinfo = 
 {
 	name = "[TF2] Custom Boss Spawner",
@@ -876,18 +966,14 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	int iMax = iHorde <= 1 ? 1 : iHorde;
 	int playerCounter = GetClientCount(true);
 	int sHealth = (iBaseHP + iScaleHP*playerCounter)*(iMax != 1 ? 1 : 10);
-	DataPack dMax = new DataPack();
-	dMax.WriteCell(iMax);
+	
+	Reference reference = new Reference(iMax);
 	
 	for (int i = 0; i < iMax; i++)
 	{
 		int ent = CreateEntityByName(sType);
-		ArrayList dReference = new ArrayList();
-		dReference.Push(dMax);
-		dReference.Push(EntIndexToEntRef(ent));
-		dReference.Push(index);
-		dReference.Push(timed);
-		g_iArrayData.Push(dReference);
+		BossPack pack = new BossPack(ent, reference, index, timed);
+		g_iArrayData.Push(pack);
 		
 		TeleportEntity(ent, temp, NULL_VECTOR, NULL_VECTOR);
 		DispatchSpawn(ent);
@@ -1209,10 +1295,10 @@ public void OnEntityDestroyed(int ent)
 
 	for (int i = g_iArrayData.Length-1; i >= 0; i--)
 	{
-		ArrayList dReference = g_iArrayData.Get(i);
-		int dEnt = EntRefToEntIndex(dReference.Get(1));
+		BossPack pack = g_iArrayData.Get(i);
+		int boss_entity = pack.Entity;
 		
-		if (ent != dEnt)
+		if (ent != boss_entity)
 			continue;
 		
 		if (g_iBossEntity == ent)
@@ -1243,15 +1329,13 @@ public void OnEntityDestroyed(int ent)
 			}
 		}
 		
-		DataPack dMax = dReference.Get(0);
-		dMax.Reset();
-		int iMax = dMax.ReadCell();
-		int index = dReference.Get(2);
-		int timed = dReference.Get(3);
+		Reference reference = pack.Ref;
+		int iMax = reference.Value;
+		int index = pack.Index;
+		int timed = pack.Timed;		
 		iMax -= 1;
-		dMax.Reset();
-		dMax.WriteCell(iMax);
-		dReference.Set(0, dMax);
+		reference.Value = iMax;
+		pack.Ref = reference;
 		
 		if (timed)
 			g_iBossCount--;
@@ -1272,12 +1356,15 @@ public void OnEntityDestroyed(int ent)
 			{
 				char sName[64];
 				HashMap.GetString("Name", sName, sizeof(sName));
-				CPrintToChatAll("{green}[CBS] {darkslateblue}%N has slained the %s", g_iAttacker, sName);
+				if (1 <= g_iAttacker <= MaxClients)
+					CPrintToChatAll("{green}[CBS] {darkslateblue}%N has slained the %s!", g_iAttacker, sName);
+				else
+					CPrintToChatAll("{green}[CBS] {darkslateblue}%s has died from an unknown entity!", sName);
 			}
-			delete dMax;
+			delete reference;
 		}
 		g_iArrayData.Erase(i);
-		delete dReference;
+		delete pack;
 		break;
 	}
 }
@@ -1300,14 +1387,14 @@ public void OnPropSpawn(any ref)
 	{
 		for (int i = g_iArrayData.Length-1; i >= 0; i--)
 		{
-			ArrayList dReference = g_iArrayData.Get(i);
-			int dEnt = EntRefToEntIndex(dReference.Get(1));
-			int dIndex = dReference.Get(2);
+			BossPack pack = g_iArrayData.Get(i);
+			int boss_entity = pack.Entity;
+			int index = pack.Index;
 			
-			if (parent == dEnt)
+			if (parent == boss_entity)
 			{
 				char sWModel[256];
-				StringMap HashMap = g_iArray.Get(dIndex);
+				StringMap HashMap = g_iArray.Get(index);
 				HashMap.GetString("WeaponModel", sWModel, sizeof(sWModel));
 				if (strlen(sWModel) != 0)
 				{
@@ -1350,13 +1437,13 @@ public Action Hook_ClientTakeDamage(int victim, int &attacker, int &inflictor, f
 		float fDamage;
 		for (int i = g_iArrayData.Length-1; i >= 0; i--)
 		{
-			ArrayList dReference = g_iArrayData.Get(i);
-			int dEnt = EntRefToEntIndex(dReference.Get(1));
-			int dIndex = dReference.Get(2);
+			BossPack pack = g_iArrayData.Get(i);
+			int boss_entity = pack.Entity;
+			int index = pack.Index;
 			
-			if (attacker == dEnt)
+			if (attacker == boss_entity)
 			{
-				StringMap HashMap = g_iArray.Get(dIndex);
+				StringMap HashMap = g_iArray.Get(index);
 				HashMap.GetValue("Damage", fDamage);
 				damage = fDamage;
 				return Plugin_Changed;
