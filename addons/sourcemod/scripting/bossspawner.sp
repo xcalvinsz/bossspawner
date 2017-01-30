@@ -30,6 +30,8 @@ Version Log:
 	- FINALLY fixed a bug where boss would need to be hit 1 MORE time after it hit 0 health. (People should be able to get achievement now but that is untested.)
 	- Fixed issue with healthbar/hud having issue tracking when 2 or more bosses were active at the same time
 	- Added a death event chat notification of who killed what boss
+	- Plugin now uses a custom methodmap to create a data storage specifically for bosses
+	- Plugin now requires bossspawner.inc to compile
 	- Gnome key is removed as it was annoying to maintain/keep track of, plugin will just remove the mini-skeletons on spawn
 	- Changed warhammer boss from chaos_bosspack config "WeaponModel" to Invisible
 	- Improved caching of bosses data into memory
@@ -53,9 +55,11 @@ Known bugs:
 #pragma semicolon 1
 #include <morecolors>
 #include <sdktools>
-#pragma newdecls required
 #include <sourcemod>
 #include <sdkhooks>
+#include <bossspawner>
+
+#pragma newdecls required
 
 #define PLUGIN_VERSION "5.0.2"
 #define INTRO_SND	"ui/halloween_boss_summoned_fx.wav"
@@ -74,7 +78,7 @@ Known bugs:
 
 Handle g_cTimer;
 ArrayList g_iArray, g_iArrayData;
-ConVar g_cEyeball_Lifetime, g_cMerasmus_Lifetime, g_cMode, g_cInterval, g_cMinplayers, g_cHudx, g_cHudy, g_cHealthbar, g_cVote;
+ConVar g_cMode, g_cInterval, g_cMinplayers, g_cHudx, g_cHudy, g_cHealthbar, g_cVote;
 bool g_bEnabled;
 int g_iEyeball_Default, g_iMerasmus_Default;
 int g_iBossCount, g_iInterval, g_iTotalVotes, g_iIndex, g_iIndexCmd;
@@ -85,96 +89,6 @@ int g_iAttacker;
 bool g_bSlayCommand;
 
 int g_iVotes[MAXPLAYERS + 1];
-
-methodmap Reference < ArrayStack
-{	
-	public Reference(int a)
-	{
-		ArrayStack stack = new ArrayStack();
-		stack.Push(a);
-		return view_as<Reference>(stack);
-	}
-	
-	property int Value
-	{
-		public get()
-		{
-			int a = this.Pop();
-			this.Push(a);
-			return a;
-		}
-		public set(int a)
-		{
-			this.Pop();
-			this.Push(a);
-		}
-	}
-}
-
-methodmap BossPack < DataPack
-{
-	public BossPack (int entity, Reference reference, int index, int timed)
-	{
-		DataPack pack = new DataPack();
-		pack.WriteCell(EntIndexToEntRef(entity));
-		pack.WriteCell(reference);
-		pack.WriteCell(index);
-		pack.WriteCell(timed); 
-		return view_as<BossPack>(pack);
-	}
-	property int Entity
-	{
-		public set(int entity)
-		{
-			this.Reset();
-			this.WriteCell(EntIndexToEntRef(entity));
-		}
-		public get()
-		{
-			this.Reset();
-			return EntRefToEntIndex(this.ReadCell());
-		}
-	}
-	property Reference Ref
-	{
-		public set(Reference reference)
-		{
-			this.Reset(); this.ReadCell();
-			this.WriteCell(reference);
-		}
-		public get()
-		{
-			this.Reset(); this.ReadCell();
-			return this.ReadCell();
-		}
-	}
-	property int Index
-	{
-		public set(int index)
-		{
-			this.Reset(); this.ReadCell(); this.ReadCell();
-			this.WriteCell(index);
-		}
-		public get()
-		{
-			this.Reset(); this.ReadCell(); this.ReadCell();
-			return this.ReadCell();
-		}
-	}
-	property bool Timed
-	{
-		public set(bool timed)
-		{
-			this.Reset(); this.ReadCell(); this.ReadCell(); this.ReadCell();
-			this.WriteCell(timed);
-		}
-		public get()
-		{
-			this.Reset(); this.ReadCell(); this.ReadCell(); this.ReadCell();
-			return this.ReadCell();
-		}
-	}
-}
 
 public Plugin myinfo = 
 {
@@ -223,11 +137,9 @@ public void OnPluginStart()
 	g_iArrayData = new ArrayList();
 	
 	CreateTimer(0.5, Timer_Healthbar, _, TIMER_REPEAT);
-
-	g_cEyeball_Lifetime = FindConVar("tf_eyeball_boss_lifetime");
-	g_cMerasmus_Lifetime = FindConVar("tf_merasmus_lifetime");
-	g_iEyeball_Default = g_cEyeball_Lifetime.IntValue;
-	g_iMerasmus_Default = g_cMerasmus_Lifetime.IntValue;
+	
+	g_iEyeball_Default = FindConVar("tf_eyeball_boss_lifetime").IntValue;
+	g_iMerasmus_Default = FindConVar("tf_merasmus_lifetime").IntValue;
 	
 	g_cMinplayers.AddChangeHook(OnConvarChanged);
 	g_cInterval.AddChangeHook(OnConvarChanged);
@@ -259,7 +171,7 @@ public void OnConfigsExecuted()
 	if (!g_bEnabled)
 		return;
 		
-	FindHealthBar();
+	g_iHealthbar = FindHealthBar();
 	PrecacheSound("items/cart_explode.wav");
 }
 
@@ -1091,14 +1003,6 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	}
 }
 
-public void SetEntitySelfDestruct(int entity, float duration)
-{
-	char output[64]; 
-	Format(output, sizeof(output), "OnUser1 !self:kill::%.1f:1", duration);
-	SetVariantString(output);
-	AcceptEntityInput(entity, "AddOutput"); 
-	AcceptEntityInput(entity, "FireUser1");
-}
 
 public Action Timer_Remove(Handle hTimer, DataPack hPack)
 {
@@ -1179,45 +1083,6 @@ void RemoveExistingBoss()
 		
 	if (g_iHealthbar != -1)
 		SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
-}
-
-void SetSize(float value, int ent)
-{
-	SetEntPropFloat(ent, Prop_Send, "m_flModelScale", value);
-}
-
-void SetGlow(int ent, const char[] targetname, float kpos[3], const char[] sGlowValue)
-{
-	int glow = CreateEntityByName("tf_glow");
-			
-	DispatchKeyValue(glow, "glowcolor", sGlowValue);
-	DispatchKeyValue(glow, "target", targetname);
-	SetEntPropEnt(glow, Prop_Send, "m_hOwnerEntity", ent);
-	TeleportEntity(glow, kpos, NULL_VECTOR, NULL_VECTOR);
-	DispatchSpawn(glow);
-	
-	SetVariantString("!activator");
-	AcceptEntityInput(glow, "SetParent", ent, glow, 0);
-	
-	AcceptEntityInput(glow, "Enable");
-}
-
-void ResizeHitbox(int entity, float fScale)
-{
-	float vecBossMin[3], vecBossMax[3];
-	GetEntPropVector(entity, Prop_Send, "m_vecMins", vecBossMin);
-	GetEntPropVector(entity, Prop_Send, "m_vecMaxs", vecBossMax);
-	
-	float vecScaledBossMin[3], vecScaledBossMax[3];
-	
-	vecScaledBossMin = vecBossMin;
-	vecScaledBossMax = vecBossMax;
-	
-	ScaleVector(vecScaledBossMin, fScale);
-	ScaleVector(vecScaledBossMax, fScale);
-	
-	SetEntPropVector(entity, Prop_Send, "m_vecMins", vecScaledBossMin);
-	SetEntPropVector(entity, Prop_Send, "m_vecMaxs", vecScaledBossMax);
 }
 
 /* --------------------------------BOSS SPAWNING CORE---------------------------------*/
@@ -1412,15 +1277,6 @@ public void OnPropSpawn(any ref)
 	}
 }
 
-void FindHealthBar()
-{
-	if ((g_iHealthbar = FindEntityByClassname(g_iHealthbar, "monster_resource")) == -1)
-	{
-		g_iHealthbar = CreateEntityByName("monster_resource");
-		DispatchSpawn(g_iHealthbar);
-	}
-}
-
 public Action Hook_ClientTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype)
 {	
 	if (!IsClientInGame(victim)) 
@@ -1484,18 +1340,6 @@ public Action Hook_BossTakeDamage(int ent, int &attacker, int &inflictor, float 
 }
 
 /* ---------------------------------ENTITY MANAGEMENT---------------------------------*/
-
-/* ---------------------------------CALL FUNCTIONS------------------------------------*/
-void SetEyeballLifetime(int duration)
-{
-	g_cEyeball_Lifetime.SetInt(duration, false, false);
-}
-
-void SetMerasmusLifetime(int duration)
-{
-	g_cMerasmus_Lifetime.SetInt(duration, false, false);
-}
-/* ---------------------------------CALL FUNCTIONS------------------------------------*/
 
 /* ---------------------------------CONFIG MANAGEMENT---------------------------------*/
 public void SetupMapConfigs(const char[] sFile)
