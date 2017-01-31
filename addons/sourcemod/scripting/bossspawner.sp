@@ -34,6 +34,7 @@ Version Log:
 	- Plugin now requires bossspawner.inc to compile
 	- Gnome key is removed as it was annoying to maintain/keep track of, plugin will just remove the mini-skeletons on spawn
 	- Changed warhammer boss from chaos_bosspack config "WeaponModel" to Invisible
+	- added !client check for command callback so it doesn't error out on console
 	- Improved caching of bosses data into memory
 	- Improved timer that keeps track of boss lifetime
 	- Updated some syntax and code clean up
@@ -296,8 +297,11 @@ public Action Command_BossVote(int client, int args)
 		return Plugin_Handled;
 	}
 	
-	if (!IsClientInGame(client))
+	if (!client || !IsClientInGame(client))
+	{
+		CReplyToCommand(client, "{frozen}[Boss] You must be alive and in-game to use this command.");
 		return Plugin_Handled;
+	}
 		
 	if (!g_iVotes[client])
 	{
@@ -374,7 +378,7 @@ public Action Command_GetCoordinates(int client, int args)
 		return Plugin_Handled;
 	}
 	
-	if (!IsClientInGame(client) || !IsPlayerAlive(client))
+	if (!client || !IsClientInGame(client) || !IsPlayerAlive(client))
 	{
 		CReplyToCommand(client, "{frozen}[Boss] You must be alive and in-game to use this command.");
 		return Plugin_Handled;
@@ -413,7 +417,7 @@ public Action Command_ForceVote(int client, int args)
 }
 
 public Action OnClientSayCommand(int client, const char[] command, const char[] sArgs)
-{
+{	
 	char arg[4][64];
 	int args = ExplodeString(sArgs, " ", arg, sizeof(arg), sizeof(arg[]));
 	
@@ -441,15 +445,15 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 		return Plugin_Handled;
 	}
 	
-	if (!CheckCommandAccess(client, "sm_boss_override", ADMFLAG_GENERIC, false))
-	{
-		CPrintToChat(client, "{frozen}[Boss] {orange}You do not have access to this command.");
-		return Plugin_Handled;
-	}
-	
 	if (!IsClientInGame(client) || !IsPlayerAlive(client))
 	{
 		CPrintToChat(client, "{frozen}[Boss] {orange}You must be alive and in-game to use this command.");
+		return Plugin_Handled;
+	}
+	
+	if (!CheckCommandAccess(client, "sm_boss_override", ADMFLAG_GENERIC, false))
+	{
+		CPrintToChat(client, "{frozen}[Boss] {orange}You do not have access to this command.");
 		return Plugin_Handled;
 	}
 	
@@ -521,15 +525,15 @@ public Action SpawnBossCommand(int client, const char[] command, int args)
 		return Plugin_Handled;
 	}
 	
-	if (!CheckCommandAccess(client, "sm_boss_override", ADMFLAG_GENERIC, false))
-	{
-		CPrintToChat(client, "{frozen}[Boss] {orange}You do not have access to this command.");
-		return Plugin_Handled;
-	}
-	
 	if (!IsClientInGame(client) || !IsPlayerAlive(client))
 	{
 		CPrintToChat(client, "{frozen}[Boss] {orange}You must be alive and in-game to use this command.");
+		return Plugin_Handled;
+	}
+	
+	if (!CheckCommandAccess(client, "sm_boss_override", ADMFLAG_GENERIC, false))
+	{
+		CPrintToChat(client, "{frozen}[Boss] {orange}You do not have access to this command.");
 		return Plugin_Handled;
 	}
 	
@@ -583,7 +587,7 @@ public Action Command_SpawnMenu(int client, int args)
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	if (!IsClientInGame(client))
+	if (!client || !IsClientInGame(client))
 	{
 		CReplyToCommand(client, "{frozen}[Boss] You must be alive and in-game to use this command.");
 		return Plugin_Handled;
