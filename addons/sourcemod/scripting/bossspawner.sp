@@ -35,6 +35,8 @@ Version Log:
 	- Gnome key is removed as it was annoying to maintain/keep track of, plugin will just remove the mini-skeletons on spawn
 	- Changed warhammer boss from chaos_bosspack config "WeaponModel" to Invisible
 	- added !client check for command callback so it doesn't error out on console
+	- Will now remove a command listener when a boss is removed during map changes
+	- Countdown timers now uses GetEngineTime instead of using variables to track time
 	- Improved caching of bosses data into memory
 	- Improved timer that keeps track of boss lifetime
 	- Updated some syntax and code clean up
@@ -82,7 +84,7 @@ ArrayList g_iArray, g_iArrayData;
 ConVar g_cMode, g_cInterval, g_cMinplayers, g_cHudx, g_cHudy, g_cHealthbar, g_cVote;
 bool g_bEnabled;
 int g_iEyeball_Default, g_iMerasmus_Default;
-int g_iBossCount, g_iInterval, g_iTotalVotes, g_iIndex, g_iIndexCmd;
+int g_iBossCount, g_iTotalVotes, g_iIndex, g_iIndexCmd;
 int g_iArgIndex, g_iSaveIndex;
 int g_iBossEntity = -1, g_iHealthbar = -1;
 float g_fPos[3], g_fkPos[3];
@@ -218,7 +220,9 @@ public void OnConvarChanged(ConVar convar, char[] oldValue, char[] newValue)
 			delete g_cTimer;
 	}
 	else if (convar == g_cInterval)
-		g_iInterval = StringToInt(newValue);
+	{
+		ResetTimer();
+	}
 }
 
 public Action SayText2(UserMsg msg_id, Handle bf, int[] players, int playersNum, bool reliable, bool init)
@@ -949,8 +953,8 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		{
 			DataPack hPack;
 			CreateDataTimer(1.0, Timer_Remove, hPack, TIMER_REPEAT);
+			hPack.WriteFloat(GetEngineTime() + float(iLifetime) - 1.0);
 			hPack.WriteCell(EntIndexToEntRef(ent));
-			hPack.WriteCell(iLifetime-1);
 			hPack.WriteCell(index);
 		}
 		SetEntitySelfDestruct(ent, float(iLifetime)+0.1);
@@ -1011,15 +1015,14 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 public Action Timer_Remove(Handle hTimer, DataPack hPack)
 {
 	hPack.Reset();
-	int ent = EntRefToEntIndex(hPack.ReadCell());
 	
-	if (!IsValidEntity(ent))
-		return Plugin_Stop;
-	
-	int counter = hPack.ReadCell();
-	
-	if (counter <= 0)
+	if (GetEngineTime() >= hPack.ReadFloat())
 	{
+		int ent = EntRefToEntIndex(hPack.ReadCell());
+	
+		if (!IsValidEntity(ent))
+			return Plugin_Stop;
+		
 		char sName[64];
 		StringMap HashMap = g_iArray.Get(hPack.ReadCell());
 		HashMap.GetString("Name", sName, sizeof(sName));
@@ -1032,13 +1035,7 @@ public Action Timer_Remove(Handle hTimer, DataPack hPack)
 				
 		return Plugin_Stop;
 	}
-	else
-	{
-		hPack.Reset();
-		hPack.ReadCell();
-		hPack.WriteCell(--counter);
-		return Plugin_Continue;
-	}
+	return Plugin_Continue;
 }
 
 //Instead of hooking to sdkhook_takedamage, we use a 0.5 timer because of hud overloading when taking damage
@@ -1097,26 +1094,27 @@ public void CreateCountdownTimer()
 {
 	if (!g_bEnabled) 
 		return;
-	g_iInterval = g_cInterval.IntValue;
-	g_cTimer = CreateTimer(1.0, Timer_HUDCounter, _, TIMER_REPEAT);
+	
+	g_cTimer = CreateTimer(1.0, Timer_HUDCounter, GetEngineTime() + float(g_cInterval.IntValue), TIMER_REPEAT);
 }
 
-public Action Timer_HUDCounter(Handle hTimer)
+public Action Timer_HUDCounter(Handle hTimer, float time)
 {
-	for (int i = 1; i <= MaxClients; i++)
-	{
-		if(!IsClientInGame(i))
-			continue;
-		SetHudTextParams(g_cHudx.FloatValue, g_cHudy.FloatValue, 1.0, 255, 255, 255, 255);
-		ShowHudText(i, -1, "Boss: %d seconds", g_iInterval);
-	}
-	
-	if (g_iInterval-- <= 0)
+	if (GetEngineTime() >= time)
 	{
 		SpawnBoss();
 		g_cTimer = null;
 		return Plugin_Stop;
 	}
+	
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if(!IsClientInGame(i))
+			continue;
+		SetHudTextParams(g_cHudx.FloatValue, g_cHudy.FloatValue, 1.0, 255, 255, 255, 255);
+		ShowHudText(i, -1, "Boss: %d seconds", RoundFloat(time - GetEngineTime()));
+	}
+	
 	return Plugin_Continue;
 }
 
@@ -1470,10 +1468,22 @@ public void SetupBossConfigs(const char[] sFile)
 		SetFailState("[CBS] Could not read maps file: %s", sPath);
 	}
 	
-	g_iArray.Clear();
 	char sName[64], sModel[256], sType[32], sBase[16], sScale[16], sWModel[256], sSize[16], sGlow[32], sPosFix[32];
 	char sLifetime[32], sPosition[32], sHorde[8], sColor[16], sISound[256], sDSound[256], sHModel[256];
 	char sHatPosFix[32], sHatSize[16], sDamage[32];
+	
+	//Remove any command listeners if boss was removed between map changes
+	for (int i = 0; i < g_iArray.Length; i++)
+	{
+		StringMap HashMap = g_iArray.Get(i);
+		HashMap.GetString("Name", sName, sizeof(sName));
+		
+		char command[64];
+		Format(command, sizeof(command), "sm_%s", sName);
+		RemoveCommandListener(SpawnBossCommand, command);
+	}
+	
+	g_iArray.Clear();
 	
 	do
 	{
