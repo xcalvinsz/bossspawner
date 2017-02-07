@@ -84,14 +84,10 @@ Known bugs:
 Handle g_hTimer, g_hHudSync;
 ArrayList g_iArray, g_iArrayData;
 ConVar g_cMode, g_cInterval, g_cMinplayers, g_cHudx, g_cHudy, g_cHealthbar, g_cVote;
-bool g_bEnabled;
-int g_iEyeball_Default, g_iMerasmus_Default;
-int g_iBossCount, g_iTotalVotes, g_iIndex, g_iIndexCmd;
-int g_iArgIndex, g_iSaveIndex;
+int g_iEyeball_Default, g_iMerasmus_Default, g_iBossCount, g_iTotalVotes, g_iIndex, g_iIndexCmd, g_iArgIndex, g_iSaveIndex, g_iAttacker;
 int g_iBossEntity = -1, g_iHealthbar = -1;
 float g_fPos[3], g_fkPos[3];
-int g_iAttacker;
-bool g_bSlayCommand;
+bool g_bEnabled, g_bSlayCommand;
 
 int g_iVotes[MAXPLAYERS + 1];
 
@@ -101,7 +97,7 @@ public Plugin myinfo =
 	author = "Tak (chaosxk)",
 	description = "A customizable boss spawner",
 	version = PLUGIN_VERSION,
-	url = "http://www.sourcemod.net"
+	url = "https://github.com/xcalvinsz/bossspawner"
 }
 
 public void OnPluginStart()
@@ -248,7 +244,6 @@ public Action SayText2(UserMsg msg_id, Handle bf, int[] players, int playersNum,
 	return Plugin_Continue;
 }
 
-/* -----------------------------------EVENT HANDLES-----------------------------------*/
 public Action Event_Round_Start(Event event, const char[] name, bool dontBroadcast)
 {
 	g_iBossCount = 0;
@@ -269,10 +264,6 @@ public Action Event_Blocked(Event event, const char[] name, bool dontBroadcast)
 {
 	return g_bEnabled ? Plugin_Handled : Plugin_Continue;
 }
-
-/* -----------------------------------EVENT HANDLES-----------------------------------*/
-
-/* ---------------------------------COMMAND FUNCTION----------------------------------*/
 
 public Action Command_BossVote(int client, int args)
 {
@@ -798,10 +789,6 @@ public int Handle_VoteMenu(Menu menu, MenuAction action, int param1, int param2)
 	}
 }
 
-/* ---------------------------------COMMAND FUNCTION----------------------------------*/
-
-/* --------------------------------BOSS SPAWNING CORE---------------------------------*/
-
 public void SpawnBoss()
 {
 	char sGlow[32];
@@ -1109,10 +1096,6 @@ void ResetTimer()
 			CPrintToChat(i, "%t", "Time", g_cInterval.IntValue);
 }
 
-/* ---------------------------------TIMER & HUD CORE----------------------------------*/
-
-/* ---------------------------------ENTITY MANAGEMENT---------------------------------*/
-
 public void OnEntityCreated(int ent, const char[] classname)
 {
 	if (!g_bEnabled)
@@ -1319,9 +1302,6 @@ public Action Hook_BossTakeDamage(int ent, int &attacker, int &inflictor, float 
 	return Plugin_Continue;
 }
 
-/* ---------------------------------ENTITY MANAGEMENT---------------------------------*/
-
-/* ---------------------------------CONFIG MANAGEMENT---------------------------------*/
 public void SetupMapConfigs(const char[] sFile)
 {
 	char sPath[PLATFORM_MAX_PATH];
@@ -1672,4 +1652,3 @@ public void SetupDownloads(const char[] sFile)
 	}
 	delete file;
 }
-/* ---------------------------------CONFIG MANAGEMENT---------------------------------*/
