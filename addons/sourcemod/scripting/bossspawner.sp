@@ -35,6 +35,7 @@ Version Log:
 	- Gnome key is removed as it was annoying to maintain/keep track of, plugin will just remove the mini-skeletons on spawn
 	- Changed warhammer boss from chaos_bosspack config "WeaponModel" to Invisible
 	- added !client check for command callback so it doesn't error out on console
+	- Changed ShowHudText to ShowSyncHudText to prevent HUD display conflict with other plugins
 	- Will now remove a command listener when a boss is removed during map changes
 	- Countdown timers now uses GetEngineTime instead of using variables to track time
 	- Improved caching of bosses data into memory
@@ -80,7 +81,7 @@ Known bugs:
 #define EF_BONEMERGE_FASTCULL   (1 << 7)
 #define EF_PARENT_ANIMATES      (1 << 9)
 
-Handle g_cTimer;
+Handle g_hTimer, g_hHudSync;
 ArrayList g_iArray, g_iArrayData;
 ConVar g_cMode, g_cInterval, g_cMinplayers, g_cHudx, g_cHudy, g_cHealthbar, g_cVote;
 bool g_bEnabled;
@@ -126,14 +127,14 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_voteboss", Command_BossVote, "Start a vote, needs minimum amount of people to run this command to start a vote.  Follows sm_boss_vote");
 	
 	HookEvent("teamplay_round_start", Event_Round_Start, EventHookMode_Pre);
-	HookEvent("pumpkin_lord_summoned", Event_Boss_Spawned, EventHookMode_Pre);
-	HookEvent("eyeball_boss_summoned", Event_Boss_Spawned, EventHookMode_Pre);
-	HookEvent("merasmus_summoned", Event_Boss_Spawned, EventHookMode_Pre);
-	HookEvent("pumpkin_lord_killed", Event_Boss_Death, EventHookMode_Pre);
-	HookEvent("eyeball_boss_killed", Event_Boss_Death, EventHookMode_Pre);
-	HookEvent("merasmus_killed", Event_Boss_Death, EventHookMode_Pre);
-	HookEvent("merasmus_escape_warning", Event_Merasmus_Escape, EventHookMode_Pre);
-	HookEvent("eyeball_boss_escape_imminent", Event_Monoculus_Escape, EventHookMode_Pre);
+	HookEvent("pumpkin_lord_summoned", Event_Blocked, EventHookMode_Pre);
+	HookEvent("eyeball_boss_summoned", Event_Blocked, EventHookMode_Pre);
+	HookEvent("merasmus_summoned", Event_Blocked, EventHookMode_Pre);
+	HookEvent("pumpkin_lord_killed", Event_Blocked, EventHookMode_Pre);
+	HookEvent("eyeball_boss_killed", Event_Blocked, EventHookMode_Pre);
+	HookEvent("merasmus_killed", Event_Blocked, EventHookMode_Pre);
+	HookEvent("merasmus_escape_warning", Event_Blocked, EventHookMode_Pre);
+	HookEvent("eyeball_boss_escape_imminent", Event_Blocked, EventHookMode_Pre);
 	
 	HookUserMessage(GetUserMessageId("SayText2"), SayText2, true);
 	
@@ -141,6 +142,7 @@ public void OnPluginStart()
 	g_iArrayData = new ArrayList();
 	
 	CreateTimer(0.5, Timer_Healthbar, _, TIMER_REPEAT);
+	g_hHudSync = CreateHudSynchronizer();
 	
 	g_iEyeball_Default = FindConVar("tf_eyeball_boss_lifetime").IntValue;
 	g_iMerasmus_Default = FindConVar("tf_merasmus_lifetime").IntValue;
@@ -181,7 +183,7 @@ public void OnConfigsExecuted()
 
 public void OnMapEnd()
 {
-	delete g_cTimer;
+	delete g_hTimer;
 	RemoveExistingBoss();
 }
 
@@ -200,7 +202,7 @@ public void OnClientPostAdminCheck(int client)
 public void OnClientDisconnect_Post(int client)
 {
 	if (GetClientCount(true) < g_cMinplayers.IntValue)
-		delete g_cTimer;
+		delete g_hTimer;
 	if (g_iVotes[client])
 	{
 		g_iVotes[client] = 0;
@@ -218,7 +220,7 @@ public void OnConvarChanged(ConVar convar, char[] oldValue, char[] newValue)
 		if (!g_iBossCount)
 			ResetTimer();
 		else
-			delete g_cTimer;
+			delete g_hTimer;
 	}
 	else if (convar == g_cInterval)
 	{
@@ -254,7 +256,7 @@ public Action Event_Round_Start(Event event, const char[] name, bool dontBroadca
 	if (!g_bEnabled)
 		return Plugin_Continue;
 	
-	delete g_cTimer;
+	delete g_hTimer;
 	
 	if (GetClientCount(true) >= g_cMinplayers.IntValue)
 	{
@@ -263,33 +265,11 @@ public Action Event_Round_Start(Event event, const char[] name, bool dontBroadca
 	return Plugin_Continue;
 }
 
-public Action Event_Boss_Spawned(Event event, const char[] name, bool dontBroadcast)
+public Action Event_Blocked(Event event, const char[] name, bool dontBroadcast)
 {
-	if (!g_bEnabled)
-		return Plugin_Continue;
-	return Plugin_Handled;
+	return g_bEnabled ? Plugin_Handled : Plugin_Continue;
 }
 
-public Action Event_Boss_Death(Event event, const char[] name, bool dontBroadcast)
-{
-	if (!g_bEnabled)
-		return Plugin_Continue;
-	return Plugin_Handled;
-}
-
-public Action Event_Merasmus_Escape(Event event, const char[] name, bool dontBroadcast)
-{
-	if (!g_bEnabled)
-		return Plugin_Continue;
-	return Plugin_Handled;
-}
-
-public Action Event_Monoculus_Escape(Event event, const char[] name, bool dontBroadcast)
-{
-	if (!g_bEnabled)
-		return Plugin_Continue;
-	return Plugin_Handled;
-}
 /* -----------------------------------EVENT HANDLES-----------------------------------*/
 
 /* ---------------------------------COMMAND FUNCTION----------------------------------*/
@@ -319,7 +299,7 @@ public Action Command_BossVote(int client, int args)
 		{
 			for(int i = 0; i < MaxClients; i++)
 				g_iVotes[i] = 0;
-			delete g_cTimer;
+			delete g_hTimer;
 			CreateVote();
 		}
 		else
@@ -360,14 +340,14 @@ public Action Command_ForceBossSpawn(int client, int args)
 			return Plugin_Handled;
 		}
 		g_iArgIndex = 1;
-		delete g_cTimer;
+		delete g_hTimer;
 		char sGlow[32];
 		CreateBoss(g_iIndex, g_fPos, -1, -1, -1.0, sGlow, false, true);
 	}
 	else if (args == 0)
 	{
 		g_iArgIndex = 0;
-		delete g_cTimer;
+		delete g_hTimer;
 		SpawnBoss();
 	}
 	else
@@ -415,7 +395,7 @@ public Action Command_ForceVote(int client, int args)
 		CReplyToCommand(client, "{frozen}[Boss] {orange}Custom Boss Spawner is disabled.");
 		return Plugin_Handled;
 	}
-	delete g_cTimer;
+	delete g_hTimer;
 	CreateVote();
 	CReplyToCommand(client, "%t", "Vote_Forced");
 	return Plugin_Handled;
@@ -874,7 +854,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	if (iSize == -1.0)
 		iSize = fSize;
 		
-	if (strlen(sPosition) != 0 && !isCMD)
+	if (!sPosition[0] && !isCMD)
 	{
 		char sPos[3][16];
 		ExplodeString(sPosition, ",", sPos, sizeof(sPos), sizeof(sPos[]));
@@ -884,13 +864,13 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	}
 	
 	temp[2] += fPosFix;
-	int iMax = iHorde <= 1 ? 1 : iHorde;
+	int count = iHorde <= 1 ? 1 : iHorde;
 	int playerCounter = GetClientCount(true);
-	int sHealth = (iBaseHP + iScaleHP*playerCounter)*(iMax != 1 ? 1 : 10);
+	int sHealth = (iBaseHP + iScaleHP*playerCounter)*(count != 1 ? 1 : 10);
 	
-	Reference reference = new Reference(iMax);
+	Reference reference = new Reference(count);
 	
-	for (int i = 0; i < iMax; i++)
+	for (int i = 0; i < count; i++)
 	{
 		int ent = CreateEntityByName(sType);
 		BossPack pack = new BossPack(ent, reference, index, timed);
@@ -910,7 +890,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		char targetname[128];
 		Format(targetname, sizeof(targetname), "%s%d", sName, GetRandomInt(2000, 10000));
 		//Creates boss model to bonemerge
-		if (strlen(sModel))
+		if (!sModel[0])
 		{
 			if (!StrEqual(sType, MONOCULUS))
 			{
@@ -960,7 +940,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		}
 		SetEntitySelfDestruct(ent, float(iLifetime)+0.1);
 		
-		if (strlen(sHModel) != 0)
+		if (!sHModel[0])
 		{
 			int hat = CreateEntityByName("prop_dynamic_override");
 			DispatchKeyValue(hat, "model", sHModel);
@@ -1069,7 +1049,7 @@ public Action Timer_Healthbar(Handle hTimer, any ref)
 	
 	for (int i = 1; i <= MaxClients; i++)
 		if (IsClientInGame(i))
-			ShowHudText(i, -1, "HP: %d", current_health);
+			ShowSyncHudText(i, g_hHudSync, "HP: %d", current_health);
 	return Plugin_Continue;
 }
 
@@ -1096,7 +1076,7 @@ public void CreateCountdownTimer()
 	if (!g_bEnabled) 
 		return;
 	
-	g_cTimer = CreateTimer(1.0, Timer_HUDCounter, GetEngineTime() + float(g_cInterval.IntValue), TIMER_REPEAT);
+	g_hTimer = CreateTimer(1.0, Timer_HUDCounter, GetEngineTime() + float(g_cInterval.IntValue), TIMER_REPEAT);
 }
 
 public Action Timer_HUDCounter(Handle hTimer, float time)
@@ -1104,7 +1084,7 @@ public Action Timer_HUDCounter(Handle hTimer, float time)
 	if (GetEngineTime() >= time)
 	{
 		SpawnBoss();
-		g_cTimer = null;
+		g_hTimer = null;
 		return Plugin_Stop;
 	}
 	
@@ -1113,7 +1093,7 @@ public Action Timer_HUDCounter(Handle hTimer, float time)
 		if(!IsClientInGame(i))
 			continue;
 		SetHudTextParams(g_cHudx.FloatValue, g_cHudy.FloatValue, 1.0, 255, 255, 255, 255);
-		ShowHudText(i, -1, "Boss: %d seconds", RoundFloat(time - GetEngineTime()));
+		ShowSyncHudText(i, g_hHudSync, "Boss: %d seconds", RoundFloat(time - GetEngineTime()));
 	}
 	
 	return Plugin_Continue;
@@ -1121,7 +1101,7 @@ public Action Timer_HUDCounter(Handle hTimer, float time)
 
 void ResetTimer()
 {
-	delete g_cTimer;
+	delete g_hTimer;
 	CreateCountdownTimer();
 	
 	for (int i = 1; i <= MaxClients; i++)
@@ -1189,26 +1169,26 @@ public void OnEntityDestroyed(int ent)
 				SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
 			else
 			{
-				int HP = GetEntProp(g_iBossEntity, Prop_Data, "m_iHealth");
-				int maxHP = GetEntProp(g_iBossEntity, Prop_Data, "m_iMaxHealth");
+				int health = GetEntProp(g_iBossEntity, Prop_Data, "m_iHealth");
+				int max_health = GetEntProp(g_iBossEntity, Prop_Data, "m_iMaxHealth");
 				
 				if (g_cHealthbar.IntValue == 1 || g_cHealthbar.IntValue == 3)
-					SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", RoundToCeil((float(HP) / float(maxHP / 10)) * 255.9));
+					SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", RoundToCeil((float(health) / float(max_health / 10)) * 255.9));
 			}
 		}
 		
 		Reference reference = pack.Ref;
-		int iMax = reference.Value;
+		int count = reference.Value;
 		int index = pack.Index;
 		int timed = pack.Timed;		
-		iMax -= 1;
-		reference.Value = iMax;
+		count -= 1;
+		reference.Value = count;
 		pack.Ref = reference;
 		
 		if (timed)
 			g_iBossCount--;
 			
-		if (iMax == 0)
+		if (count == 0)
 		{
 			StringMap HashMap = g_iArray.Get(index);
 			char sDSound[256];
@@ -1264,7 +1244,7 @@ public void OnPropSpawn(any ref)
 				char sWModel[256];
 				StringMap HashMap = g_iArray.Get(index);
 				HashMap.GetString("WeaponModel", sWModel, sizeof(sWModel));
-				if (strlen(sWModel) != 0)
+				if (!sWModel[0])
 				{
 					if (StrEqual(sWModel, "Invisible"))
 						SetEntProp(ent, Prop_Send, "m_fEffects", EF_NODRAW);
@@ -1295,10 +1275,10 @@ public Action Hook_ClientTakeDamage(int victim, int &attacker, int &inflictor, f
 		{
 			BossPack pack = g_iArrayData.Get(i);
 			int boss_entity = pack.Entity;
-			int index = pack.Index;
 			
 			if (attacker == boss_entity)
 			{
+				int index = pack.Index;
 				StringMap HashMap = g_iArray.Get(index);
 				HashMap.GetValue("Damage", fDamage);
 				damage = fDamage;
@@ -1313,17 +1293,17 @@ public Action Hook_BossTakeDamage(int ent, int &attacker, int &inflictor, float 
 {
 	if (g_iHealthbar == -1)
 		return Plugin_Continue;
-		
-	int HP = GetEntProp(ent, Prop_Data, "m_iHealth");
-	int maxHP = GetEntProp(ent, Prop_Data, "m_iMaxHealth");
-	float currentHP = (HP - maxHP * 0.9) - damage;
+	
+	int health = GetEntProp(g_iBossEntity, Prop_Data, "m_iHealth");
+	int max_health = GetEntProp(g_iBossEntity, Prop_Data, "m_iMaxHealth");
+	float current_health = (health - max_health * 0.9) - damage;
 	
 	g_iBossEntity = ent;
 	
-	if (currentHP > 0.0)
+	if (current_health > 0.0)
 	{
 		if (g_cHealthbar.IntValue == 1 || g_cHealthbar.IntValue == 3)
-			SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", RoundToCeil((float(HP) / float(maxHP / 10)) * 255.9));
+			SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", RoundToCeil((float(health) / float(max_health / 10)) * 255.9));
 		return Plugin_Continue;
 	}
 	
@@ -1400,7 +1380,7 @@ public void SetupMapConfigs(const char[] sFile)
 	}
 	
 	float tpos[3];
-	if (strlen(sPosition) != 0)
+	if (!sPosition[0])
 	{
 		int ent = -1;
 		while ((ent = FindEntityByClassname(ent, "info_target")) != -1)
@@ -1566,7 +1546,7 @@ public void SetupBossConfigs(const char[] sFile)
 		if (bMonoculus)
 		{
 			SetEyeballLifetime(9999999);
-			if (strlen(sModel))
+			if (!sModel[0])
 			{
 				LogError("[CBS] Can not apply custom model to monoculus.");
 				SetFailState("[CBS] Can not apply custom model to monoculus.");
@@ -1582,7 +1562,7 @@ public void SetupBossConfigs(const char[] sFile)
 			SetFailState("[CBS] For tf_zombie type, size can not be lower than 1.0");
 		}
 		
-		if (strlen(sWModel))
+		if (!sWModel[0])
 		{
 			if (!bHorseman)
 			{
@@ -1593,10 +1573,10 @@ public void SetupBossConfigs(const char[] sFile)
 				PrecacheModel(sWModel, true);
 		}
 		
-		if (strlen(sModel))
+		if (!sModel[0])
 			PrecacheModel(sModel, true);
 			
-		if (strlen(sHModel))
+		if (!sHModel[0])
 			PrecacheModel(sHModel, true);
 			
 		PrecacheSound(sISound);
