@@ -44,6 +44,7 @@ Version Log:
 	- General code cleanup
 
 Known bugs: 
+	- Fixed sync hud
 	- Need to fix the vote percentage being wrong
 	- Need to fix translation files for vote ended
 	- multiple sounds played on death
@@ -1281,9 +1282,6 @@ public void OnPropSpawn(any ref)
 
 public Action Hook_ClientTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype)
 {	
-	if (!IsClientInGame(victim)) 
-		return Plugin_Continue;
-		
 	if (!IsValidEntity(attacker)) 
 		return Plugin_Continue;
 		
@@ -1650,10 +1648,8 @@ public void SetupDownloads(const char[] sFile)
 	char buffer[256], fName[128], fPath[256];
 	while (!file.EndOfFile() && file.ReadLine(buffer, sizeof(buffer)))
 	{
-		int i = -1;
-		i = FindCharInString(buffer, '\n', true);
-		
-		if(i != -1) 
+		int i;	
+		if ((i = FindCharInString(buffer, '\n', true)) != -1)
 			buffer[i] = '\0';
 			
 		TrimString(buffer);
