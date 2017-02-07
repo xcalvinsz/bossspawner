@@ -73,7 +73,7 @@ Known bugs:
 #define MONOCULUS	"eyeball_boss"
 #define MERASMUS	"merasmus"
 #define SKELETON	"tf_zombie"
-#define SNULL 		""
+#define SNULL 		"\0"
 
 #define EF_NODRAW				(1 << 5)
 #define EF_BONEMERGE            (1 << 0)
@@ -877,7 +877,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		char targetname[128];
 		Format(targetname, sizeof(targetname), "%s%d", sName, GetRandomInt(2000, 10000));
 		//Creates boss model to bonemerge
-		if (!sModel[0])
+		if (sModel[0])
 		{
 			if (!StrEqual(sType, MONOCULUS))
 			{
@@ -927,7 +927,7 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 		}
 		SetEntitySelfDestruct(ent, float(iLifetime)+0.1);
 		
-		if (!sHModel[0])
+		if (sHModel[0])
 		{
 			int hat = CreateEntityByName("prop_dynamic_override");
 			DispatchKeyValue(hat, "model", sHModel);
@@ -1053,10 +1053,6 @@ void RemoveExistingBoss()
 	if (g_iHealthbar != -1)
 		SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", 0);
 }
-
-/* --------------------------------BOSS SPAWNING CORE---------------------------------*/
-
-/* ---------------------------------TIMER & HUD CORE----------------------------------*/
 
 public void CreateCountdownTimer()
 {
@@ -1194,6 +1190,7 @@ public void OnEntityDestroyed(int ent)
 			}
 			delete reference;
 		}
+		g_iAttacker = -1;
 		g_iArrayData.Erase(i);
 		delete pack;
 		break;
@@ -1227,7 +1224,7 @@ public void OnPropSpawn(any ref)
 				char sWModel[256];
 				StringMap HashMap = g_iArray.Get(index);
 				HashMap.GetString("WeaponModel", sWModel, sizeof(sWModel));
-				if (!sWModel[0])
+				if (sWModel[0])
 				{
 					if (StrEqual(sWModel, "Invisible"))
 						SetEntProp(ent, Prop_Send, "m_fEffects", EF_NODRAW);
@@ -1276,6 +1273,9 @@ public Action Hook_BossTakeDamage(int ent, int &attacker, int &inflictor, float 
 {
 	if (g_iHealthbar == -1)
 		return Plugin_Continue;
+		
+	if (!IsValidEntity(g_iBossEntity))
+		return Plugin_Continue;
 	
 	int health = GetEntProp(g_iBossEntity, Prop_Data, "m_iHealth");
 	int max_health = GetEntProp(g_iBossEntity, Prop_Data, "m_iMaxHealth");
@@ -1290,15 +1290,19 @@ public Action Hook_BossTakeDamage(int ent, int &attacker, int &inflictor, float 
 		return Plugin_Continue;
 	}
 	
-	g_iAttacker = attacker;
-	g_bSlayCommand = false;
-	SetEntProp(ent, Prop_Data, "m_iHealth", 0);
-	
 	char classname[32];
 	GetEntityClassname(ent, classname, sizeof(classname));
 	
 	if (StrEqual(classname, SKELETON))
+	{
 		AcceptEntityInput(ent, "kill");
+		return Plugin_Handled;
+	}
+		
+	g_iAttacker = attacker;
+	g_bSlayCommand = false;
+	SetEntProp(ent, Prop_Data, "m_iHealth", 0);
+	
 	return Plugin_Continue;
 }
 
@@ -1360,7 +1364,7 @@ public void SetupMapConfigs(const char[] sFile)
 	}
 	
 	float tpos[3];
-	if (!sPosition[0])
+	if (sPosition[0])
 	{
 		int ent = -1;
 		while ((ent = FindEntityByClassname(ent, "info_target")) != -1)
@@ -1526,7 +1530,7 @@ public void SetupBossConfigs(const char[] sFile)
 		if (bMonoculus)
 		{
 			SetEyeballLifetime(9999999);
-			if (!sModel[0])
+			if (sModel[0])
 			{
 				LogError("[CBS] Can not apply custom model to monoculus.");
 				SetFailState("[CBS] Can not apply custom model to monoculus.");
@@ -1542,8 +1546,9 @@ public void SetupBossConfigs(const char[] sFile)
 			SetFailState("[CBS] For tf_zombie type, size can not be lower than 1.0");
 		}
 		
-		if (!sWModel[0])
+		if (sWModel[0])
 		{
+			PrintToServer("1");
 			if (!bHorseman)
 			{
 				LogError("[CBS] Weapon model can only be changed on boss type: headless_hatman");
@@ -1553,10 +1558,10 @@ public void SetupBossConfigs(const char[] sFile)
 				PrecacheModel(sWModel, true);
 		}
 		
-		if (!sModel[0])
+		if (sModel[0])
 			PrecacheModel(sModel, true);
 			
-		if (!sHModel[0])
+		if (sHModel[0])
 			PrecacheModel(sHModel, true);
 			
 		PrecacheSound(sISound);
