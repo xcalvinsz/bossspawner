@@ -38,6 +38,7 @@ Version Log:
 	- Changed ShowHudText to ShowSyncHudText to prevent HUD display conflict with other plugins
 	- Will now remove a command listener when a boss is removed during map changes
 	- Countdown timers now uses GetEngineTime instead of using variables to track time
+	- Bosses health are no longer increased by *10 and health bar *0.9 (Did this for merasmus but seems like merasmus bug was fixed by valve)
 	- Improved caching of bosses data into memory
 	- Improved timer that keeps track of boss lifetime
 	- Updated some syntax and code clean up
@@ -45,7 +46,8 @@ Version Log:
 	- General code cleanup
 
 Known bugs: 
-	- Fixed sync hud
+	- Fixed sync hud, flickering between health and countdown
+	- small skeletons still spawning
 	- Need to fix the vote percentage being wrong
 	- Need to fix translation files for vote ended
 	- multiple sounds played on death
@@ -853,7 +855,8 @@ public void CreateBoss(int index, float kpos[3], int iBaseHP, int iScaleHP, floa
 	temp[2] += fPosFix;
 	int count = iHorde <= 1 ? 1 : iHorde;
 	int playerCounter = GetClientCount(true);
-	int sHealth = (iBaseHP + iScaleHP*playerCounter)*(count != 1 ? 1 : 10);
+	int sHealth = (iBaseHP + RoundFloat(float(iScaleHP) * float(playerCounter)));
+	PrintToChatAll("%d", sHealth);
 	
 	Reference reference = new Reference(count);
 	
@@ -1017,26 +1020,26 @@ public Action Timer_Healthbar(Handle hTimer, any ref)
 		
 	int health = GetEntProp(g_iBossEntity, Prop_Data, "m_iHealth");
 	int max_health = GetEntProp(g_iBossEntity, Prop_Data, "m_iMaxHealth");
-	int current_health = RoundFloat(health - max_health * 0.9);
 	
-	float max_threshold = max_health * 0.1 * 0.65;
-	float min_threshold = max_health * 0.1 * 0.25;
+	float max_threshold = max_health * 0.65;
+	float min_threshold = max_health * 0.25;
 	
-	if (current_health > max_threshold) 
+	if (health > max_threshold) 
 		SetHudTextParams(0.46, 0.12, 0.5, 0, 255, 0, 255);
-	else if (min_threshold < current_health < max_threshold) 
+	else if (min_threshold < health < max_threshold) 
 		SetHudTextParams(0.46, 0.12, 0.5, 255, 255, 0, 255);
-	else if (0 < current_health < min_threshold)
+	else if (0 < health < min_threshold)
 		SetHudTextParams(0.46, 0.12, 0.5, 255, 0, 0, 255);
 	else
 	{
 		SetHudTextParams(0.46, 0.12, 0.5, 0, 0, 0, 0);
-		current_health = 0;
+		health = 0;
 	}
 	
 	for (int i = 1; i <= MaxClients; i++)
 		if (IsClientInGame(i))
-			ShowSyncHudText(i, g_hHudSync, "HP: %d", current_health);
+			ShowSyncHudText(i, g_hHudSync, "HP: %d", health);
+	
 	return Plugin_Continue;
 }
 
@@ -1152,7 +1155,7 @@ public void OnEntityDestroyed(int ent)
 				int max_health = GetEntProp(g_iBossEntity, Prop_Data, "m_iMaxHealth");
 				
 				if (g_cHealthbar.IntValue == 1 || g_cHealthbar.IntValue == 3)
-					SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", RoundToCeil((float(health) / float(max_health / 10)) * 255.9));
+					SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", RoundToCeil((float(health) / float(max_health)) * 255.9));
 			}
 		}
 		
@@ -1274,21 +1277,23 @@ public Action Hook_BossTakeDamage(int ent, int &attacker, int &inflictor, float 
 	if (g_iHealthbar == -1)
 		return Plugin_Continue;
 		
-	if (!IsValidEntity(g_iBossEntity))
+	if (!IsValidEntity(ent))
 		return Plugin_Continue;
 	
-	int health = GetEntProp(g_iBossEntity, Prop_Data, "m_iHealth");
-	int max_health = GetEntProp(g_iBossEntity, Prop_Data, "m_iMaxHealth");
-	float current_health = (health - max_health * 0.9) - damage;
+	int health = GetEntProp(ent, Prop_Data, "m_iHealth");
+	int max_health = GetEntProp(ent, Prop_Data, "m_iMaxHealth");
 	
 	g_iBossEntity = ent;
 	
-	if (current_health > 0.0)
+	if (health - damage > 0)
 	{
 		if (g_cHealthbar.IntValue == 1 || g_cHealthbar.IntValue == 3)
-			SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", RoundToCeil((float(health) / float(max_health / 10)) * 255.9));
+			SetEntProp(g_iHealthbar, Prop_Send, "m_iBossHealthPercentageByte", RoundToCeil((float(health) / float(max_health)) * 255.9));
 		return Plugin_Continue;
 	}
+	
+	g_iAttacker = attacker;
+	g_bSlayCommand = false;
 	
 	char classname[32];
 	GetEntityClassname(ent, classname, sizeof(classname));
@@ -1298,9 +1303,7 @@ public Action Hook_BossTakeDamage(int ent, int &attacker, int &inflictor, float 
 		AcceptEntityInput(ent, "kill");
 		return Plugin_Handled;
 	}
-		
-	g_iAttacker = attacker;
-	g_bSlayCommand = false;
+	
 	SetEntProp(ent, Prop_Data, "m_iHealth", 0);
 	
 	return Plugin_Continue;
