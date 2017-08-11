@@ -29,6 +29,7 @@ Version Log:
 	- Fixed bug with total votes would be wrong if too many people disconnected
 	- FINALLY fixed a bug where boss would need to be hit 1 MORE time after it hit 0 health. (People should be able to get achievement now but that is untested.)
 	- Fixed issue with healthbar/hud having issue tracking when 2 or more bosses were active at the same time
+	- Fixed memory leak with stringmap in boss configuration file when changing maps
 	- Added a death event chat notification of who killed what boss
 	- Plugin now uses a custom methodmap to create a data storage specifically for bosses
 	- Plugin now requires bossspawner.inc to compile
@@ -42,11 +43,10 @@ Version Log:
 	- Improved caching of bosses data into memory
 	- Improved timer that keeps track of boss lifetime
 	- Updated some syntax and code clean up
-	- Optimization of code
-	- General code cleanup
 
 Known bugs: 
 	- Fixed sync hud, flickering between health and countdown
+	- Fix glow name from random to entity number
 	- small skeletons still spawning
 	- Need to fix the vote percentage being wrong
 	- Need to fix translation files for vote ended
@@ -1039,7 +1039,7 @@ public Action Timer_Healthbar(Handle hTimer, any ref)
 	for (int i = 1; i <= MaxClients; i++)
 		if (IsClientInGame(i))
 			ShowSyncHudText(i, g_hHudSync, "HP: %d", health);
-	
+			
 	return Plugin_Continue;
 }
 
@@ -1117,9 +1117,12 @@ public void OnEntityDestroyed(int ent)
 {
 	if (!g_bEnabled)
 		return;
+	
+	if (!IsValidEntity(ent))
+		return;
 		
 	char classname[32];
-	GetEntityClassname(ent, classname, 32);
+	GetEntityClassname(ent, classname, sizeof(classname));
 	if (!StrEqual(classname, HORSEMAN) && !StrEqual(classname, MONOCULUS) && !StrEqual(classname, MERASMUS) && !StrEqual(classname, SKELETON))
 		return;
 
@@ -1335,7 +1338,7 @@ public void SetupMapConfigs(const char[] sFile)
 	float temp_pos[3];
 	char requestMap[64], currentMap[64], sPosition[64], tPosition[64];
 	GetCurrentMap(currentMap, sizeof(currentMap));
-	
+	PrintToServer("%s", currentMap);
 	do 
 	{
 		kv.GetSectionName(requestMap, sizeof(requestMap));
