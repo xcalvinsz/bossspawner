@@ -1,0 +1,30 @@
+"Phrases"
+{
+	"Time"
+	{
+		"#format"	"{1:d}"
+		"ru"		"{frozen}[Босс] {orange}Следующий босс появится через {1} секунд."
+	}
+	"Boss_Spawn"
+	{
+		"#format"	"{1:s}"
+		"ru"		"{frozen}[Босс] {orange}{1} появился!"
+	}
+	"Boss_Slain"
+	{
+		"ru"		"{frozen}[Босс] {orange}Все боссы были убиты!"
+	}
+	"No_Boss"
+	{
+		"ru"		"{frozen}[Босс] {orange}Больше нет боссов для убийства."
+	}
+	"Boss_Left"
+	{
+		"#format"	"{1:s}"
+		"ru"		"{frozen}[Босс] {orange}{1} покинул карту из-за скуки."
+	}
+	"Vote_Forced"
+	{
+		"ru"		"{frozen}[Босс] {orange}Голосование было принудительно начато."
+	}
+}
